@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+
+# Environments
+.venv/
+env/
+*.egg-info/
+
+# Data
+data/
+outputs/
+*.csv
+*.parquet
+
+# Logs
+logs/
+slurm_output/
+
+# OS
+.DS_Store
+
+# HuggingFace cache (important on server)
+.cache/
+
+# big files
+rutte_ii.csv

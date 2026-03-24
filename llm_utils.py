@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from typing import Dict, Any
 
@@ -10,9 +11,16 @@ class LocalLLM:
     def __init__(self, model_name: str):
         self.model_name = model_name
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            token=hf_token,
+        )
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
+            token=hf_token,
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
             device_map="auto",
         )
@@ -49,23 +57,16 @@ class LocalLLM:
 
 
 def extract_json(text: str) -> Dict[str, Any]:
-    """
-    Robustly extract the first JSON object from model output.
-    """
     text = text.strip()
-
-    # Remove markdown fences if present
     text = re.sub(r"^```json\s*", "", text)
     text = re.sub(r"^```\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
 
-    # Try direct parse first
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Fallback: grab first {...} block
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not match:
         raise ValueError(f"No JSON object found in output:\n{text}")

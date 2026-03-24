@@ -18,46 +18,52 @@ def build_incremental_summary_prompt(
     max_words: int = 200,
 ) -> str:
     return f"""
-Je helpt bij het incrementeel samenvatten van een parlementair debat.
+    Je bent een assistent voor incrementele samenvatting van Nederlandse parlementaire debatten.
 
-Doel:
-Werk de lopende samenvatting van het debat bij op basis van de NIEUWE INTERVENTIE, zodat latere interventies goed in hun politieke en argumentatieve context kunnen worden geïnterpreteerd.
+    BELANGRIJK:
+    - Geef uitsluitend geldige JSON terug.
+    - Schrijf alle inhoud van de JSON volledig in het Nederlands.
+    - Gebruik nergens Engels in de uitvoer.
+    - De waarden van "updated_summary" en alle items in "new_information_added" moeten volledig Nederlandstalig zijn.
+    - Verzin geen informatie.
 
-Taak:
-Verwerk de inhoud van de NIEUWE INTERVENTIE in de bestaande samenvatting van het debat tot nu toe.
+    Taak:
+    Werk de lopende samenvatting bij op basis van de nieuwe interventie.
 
-Instructies:
-- Schrijf alles in het Nederlands.
-- Geef alleen geldige JSON terug.
-- Focus uitsluitend op inhoudelijke politieke inhoud.
-- Behoud het hoofdonderwerp van het debat, de standpunten van sprekers en partijen, meningsverschillen, argumenten, voorstellen, bezwaren en relevante reacties.
-- Voeg nieuwe relevante informatie uit de NIEUWE INTERVENTIE toe aan de samenvatting.
-- Laat begroetingen, procedurele opmerkingen, humor en retorische opvulling weg, tenzij ze inhoudelijk relevant zijn voor het politieke standpunt of de argumentatie.
-- Zorg dat de samenvatting cumulatief blijft: belangrijke eerdere informatie mag niet verdwijnen tenzij zij duidelijk irrelevant is geworden.
-- Vat conflicten en verschillen in positie expliciet samen; maak tegengestelde standpunten niet onnodig vaag of algemeen.
-- Geef de voorkeur aan informatiedichtheid en duidelijkheid boven mooie formulering.
-- Verzin geen informatie en trek geen conclusies die niet in de tekst staan.
-- Houd de bijgewerkte samenvatting onder de {max_words} woorden.
+    Doel:
+    Behoud voldoende politieke en argumentatieve context om latere interventies correct te kunnen interpreteren.
 
-JSON-schema:
-{{
-  "updated_summary": "",
-  "new_information_added": [
-    ""
-  ]
-}}
+    Instructies:
+    - Focus op inhoudelijke politieke inhoud.
+    - Behoud onderwerp, standpunten, meningsverschillen, argumenten, voorstellen en bezwaren.
+    - Voeg relevante nieuwe informatie toe.
+    - Laat procedurele of luchtige opmerkingen weg, tenzij inhoudelijk relevant.
+    - Houd de samenvatting compact maar informatief.
+    - Houd de bijgewerkte samenvatting onder de {max_words} woorden.
 
-HUIDIGE LOPENDE SAMENVATTING:
-{current_summary if current_summary else "Nog geen samenvatting."}
+    JSON-schema:
+    {{
+    "updated_summary": "",
+    "new_information_added": [
+        ""
+    ]
+    }}
 
-METADATA VAN DE NIEUWE INTERVENTIE:
-Spreker: {speaker}
-Partij: {party}
-Interventie-index: {idx}
+    HUIDIGE LOPENDE SAMENVATTING:
+    {current_summary if current_summary else "Nog geen samenvatting."}
 
-NIEUWE INTERVENTIE:
-{new_intervention_text}
-""".strip()
+    METADATA:
+    Spreker: {speaker}
+    Partij: {party}
+    Interventie-index: {idx}
+
+    NIEUWE INTERVENTIE:
+    {new_intervention_text}
+
+    Controleer vóór het beantwoorden:
+    - Is alles in het Nederlands?
+    - Is de uitvoer alleen JSON?
+    """.strip()
 
 
 def update_running_summary(
@@ -79,7 +85,7 @@ def update_running_summary(
     raw_output = llm.generate(
         prompt=prompt,
         max_new_tokens=300,
-        temperature=0.2,
+        temperature=0.1,
     )
 
     parsed = extract_json(raw_output)

@@ -28,15 +28,18 @@ class LocalLLM:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    def generate(self, prompt: str, max_new_tokens: int = 300, temperature: float = 0.2) -> str:
+    def generate(self, prompt: str, max_new_tokens: int = 300, temperature: float = 0.0) -> str:
         messages = [{"role": "user", "content": prompt}]
 
-        model_inputs = self.tokenizer.apply_chat_template(
+        text = self.tokenizer.apply_chat_template(
             messages,
-            tokenize=True,
+            tokenize=False,
             add_generation_prompt=True,
+        )
+
+        model_inputs = self.tokenizer(
+            [text],
             return_tensors="pt",
-            return_dict=True,
         )
 
         model_inputs = {k: v.to(self.model.device) for k, v in model_inputs.items()}

@@ -85,7 +85,7 @@ def update_running_summary(
     raw_output = llm.generate(
         prompt=prompt,
         max_new_tokens=300,
-        temperature=0.1,
+        temperature=0.0,
     )
 
     parsed = extract_json(raw_output)

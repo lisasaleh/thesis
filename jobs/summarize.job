@@ -14,7 +14,7 @@ module load Anaconda3/2025.06-1
 
 source activate thesis
 
-srun python src/incr_summary.py \
+srun python incr_summary.py \
   --input_csv data/local_kpa_claims.csv \
   --output_csv outputs/sample_with_incremental_summary.csv \
   --model_name meta-llama/Llama-3.1-8B-Instruct

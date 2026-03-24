@@ -23,5 +23,5 @@ hf auth whoami || true
 
 srun python incr_summary.py \
   --input_csv local_kpa_claims.csv \
-  --output_csv outputs/sample_with_incremental_summary.csv \
+  --output_csv outputs/qwen_sample_with_incremental_summary.csv \
   --model_name Qwen/Qwen2.5-7B-Instruct

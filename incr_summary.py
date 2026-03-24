@@ -24,12 +24,17 @@ Doel:
 Werk de lopende debatrepresentatie bij op basis van de NIEUWE INTERVENTIE, zodat de output steeds een samenvatting blijft van het GEHELE debat tot nu toe, niet alleen van de meest recente uitwisseling.
 
 BELANGRIJK:
-- Geef uitsluitend geldige JSON terug.
 - Schrijf alle tekst volledig in het Nederlands.
 - Verzin geen informatie.
 - Behoud belangrijke eerdere context.
 - Verwijder eerdere discussiepunten alleen als zij duidelijk niet langer relevant zijn.
 - Als de nieuwe interventie voortbouwt op een bestaand discussiepunt, werk dat punt dan bij in plaats van de samenvatting te vernauwen tot alleen de laatste bijdrage.
+
+BELANGRIJK VOOR JSON:
+- Gebruik dubbele aanhalingstekens voor alle strings.
+- Escape dubbele aanhalingstekens binnen strings correct.
+- Geef geen tekst voor of na het JSON-object.
+- Geef exact één geldig JSON-object terug.
 
 Instructies:
 - Focus op inhoudelijke politieke inhoud.

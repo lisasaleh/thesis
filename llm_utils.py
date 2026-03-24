@@ -31,19 +31,19 @@ class LocalLLM:
     def generate(self, prompt: str, max_new_tokens: int = 300, temperature: float = 0.2) -> str:
         messages = [{"role": "user", "content": prompt}]
 
-        input_ids = self.tokenizer.apply_chat_template(
+        model_inputs = self.tokenizer.apply_chat_template(
             messages,
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
-        ).to(self.model.device)
+            return_dict=True,
+        )
 
-        attention_mask = torch.ones_like(input_ids)
+        model_inputs = {k: v.to(self.model.device) for k, v in model_inputs.items()}
 
         with torch.no_grad():
             output_ids = self.model.generate(
-                input_ids,
-                attention_mask=attention_mask,
+                **model_inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=(temperature > 0),
                 temperature=temperature if temperature > 0 else None,
@@ -51,7 +51,8 @@ class LocalLLM:
                 eos_token_id=self.tokenizer.eos_token_id,
             )
 
-        generated_ids = output_ids[0][input_ids.shape[1]:]
+        input_length = model_inputs["input_ids"].shape[1]
+        generated_ids = output_ids[0][input_length:]
         text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         return text.strip()
 

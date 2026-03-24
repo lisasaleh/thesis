@@ -1,7 +1,7 @@
 import argparse
 import json
 import os
-from typing import List
+from typing import Optional, Dict, Any
 
 import pandas as pd
 from tqdm import tqdm
@@ -10,72 +10,97 @@ from llm_utils import LocalLLM, extract_json
 
 
 def build_incremental_summary_prompt(
-    current_summary: str,
+    current_state_json: Optional[str],
     speaker: str,
     party: str,
     idx: int,
     new_intervention_text: str,
-    max_words: int = 200,
+    max_words: int = 220,
 ) -> str:
     return f"""
-    Je bent een assistent voor incrementele samenvatting van Nederlandse parlementaire debatten.
+Je helpt bij het incrementeel bijhouden van een gestructureerde samenvatting van een Nederlands parlementair debat.
 
-    BELANGRIJK:
-    - Geef uitsluitend geldige JSON terug.
-    - Schrijf alle inhoud van de JSON volledig in het Nederlands.
-    - Gebruik nergens Engels in de uitvoer.
-    - De waarden van "updated_summary" en alle items in "new_information_added" moeten volledig Nederlandstalig zijn.
-    - Verzin geen informatie.
+Doel:
+Werk de lopende debatrepresentatie bij op basis van de NIEUWE INTERVENTIE, zodat de output steeds een samenvatting blijft van het GEHELE debat tot nu toe, niet alleen van de meest recente uitwisseling.
 
-    Taak:
-    Werk de lopende samenvatting bij op basis van de nieuwe interventie.
+BELANGRIJK:
+- Geef uitsluitend geldige JSON terug.
+- Schrijf alle tekst volledig in het Nederlands.
+- Verzin geen informatie.
+- Behoud belangrijke eerdere context.
+- Verwijder eerdere discussiepunten alleen als zij duidelijk niet langer relevant zijn.
+- Als de nieuwe interventie voortbouwt op een bestaand discussiepunt, werk dat punt dan bij in plaats van de samenvatting te vernauwen tot alleen de laatste bijdrage.
 
-    Doel:
-    Behoud voldoende politieke en argumentatieve context om latere interventies correct te kunnen interpreteren.
+Instructies:
+- Focus op inhoudelijke politieke inhoud.
+- Negeer begroetingen, procedurele opmerkingen, humor en retorische opvulling, tenzij inhoudelijk relevant.
+- Vat het debat samen als een verzameling terugkerende discussiepunten.
+- Noteer per discussiepunt de belangrijkste argumenten, bezwaren, voorstellen of reacties die tot nu toe zijn genoemd.
+- Zorg dat de uiteindelijke "updated_summary" een compacte samenvatting is van het gehele debat tot nu toe.
+- Houd "updated_summary" onder de {max_words} woorden.
 
-    Instructies:
-    - Focus op inhoudelijke politieke inhoud.
-    - Behoud onderwerp, standpunten, meningsverschillen, argumenten, voorstellen en bezwaren.
-    - Voeg relevante nieuwe informatie toe.
-    - Laat procedurele of luchtige opmerkingen weg, tenzij inhoudelijk relevant.
-    - Houd de samenvatting compact maar informatief.
-    - Houd de bijgewerkte samenvatting onder de {max_words} woorden.
-
-    JSON-schema:
+JSON-schema:
+{{
+  "main_topic": "",
+  "points_of_discussion": [
     {{
-    "updated_summary": "",
-    "new_information_added": [
+      "point": "",
+      "arguments": [
         ""
-    ]
+      ]
     }}
+  ],
+  "updated_summary": "",
+  "new_information_added": [
+    ""
+  ]
+}}
 
-    HUIDIGE LOPENDE SAMENVATTING:
-    {current_summary if current_summary else "Nog geen samenvatting."}
+HUIDIGE LOPENDE DEBATSTAAT:
+{current_state_json if current_state_json else "Nog geen samenvatting."}
 
-    METADATA:
-    Spreker: {speaker}
-    Partij: {party}
-    Interventie-index: {idx}
+METADATA VAN DE NIEUWE INTERVENTIE:
+Spreker: {speaker}
+Partij: {party}
+Interventie-index: {idx}
 
-    NIEUWE INTERVENTIE:
-    {new_intervention_text}
+NIEUWE INTERVENTIE:
+{new_intervention_text}
+""".strip()
 
-    Controleer vóór het beantwoorden:
-    - Is alles in het Nederlands?
-    - Is de uitvoer alleen JSON?
-    """.strip()
+
+def validate_state(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    if "main_topic" not in parsed:
+        parsed["main_topic"] = ""
+
+    if "points_of_discussion" not in parsed or not isinstance(parsed["points_of_discussion"], list):
+        parsed["points_of_discussion"] = []
+
+    if "updated_summary" not in parsed:
+        raise ValueError(f"Missing 'updated_summary' in output: {parsed}")
+
+    if "new_information_added" not in parsed or not isinstance(parsed["new_information_added"], list):
+        parsed["new_information_added"] = []
+
+    return parsed
 
 
 def update_running_summary(
     llm: LocalLLM,
-    current_summary: str,
+    current_state: Optional[Dict[str, Any]],
     new_intervention_text: str,
     speaker: str,
     party: str,
     idx: int,
-) -> dict:
+) -> Dict[str, Any]:
+    current_state_json = (
+        json.dumps(current_state, ensure_ascii=False, indent=2)
+        if current_state is not None
+        else None
+    )
+
     prompt = build_incremental_summary_prompt(
-        current_summary=current_summary,
+        current_state_json=current_state_json,
         new_intervention_text=new_intervention_text,
         speaker=speaker,
         party=party,
@@ -84,18 +109,12 @@ def update_running_summary(
 
     raw_output = llm.generate(
         prompt=prompt,
-        max_new_tokens=300,
+        max_new_tokens=500,
         temperature=0.0,
     )
 
     parsed = extract_json(raw_output)
-
-    if "updated_summary" not in parsed:
-        raise ValueError(f"Missing 'updated_summary' in output: {parsed}")
-
-    if "new_information_added" not in parsed:
-        parsed["new_information_added"] = []
-
+    parsed = validate_state(parsed)
     return parsed
 
 
@@ -116,6 +135,20 @@ def parse_args():
     return parser.parse_args()
 
 
+def load_state_from_output_cell(cell_value: Any) -> Optional[Dict[str, Any]]:
+    if pd.isna(cell_value):
+        return None
+    if not isinstance(cell_value, str) or not cell_value.strip():
+        return None
+    try:
+        parsed = json.loads(cell_value)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
 def main():
     args = parse_args()
 
@@ -134,15 +167,17 @@ def main():
 
         if start_idx > 0:
             current_doc_id = done_df.iloc[-1][args.doc_id_col]
-            running_summary = done_df.iloc[-1]["running_summary_after"]
+            running_state = load_state_from_output_cell(done_df.iloc[-1]["raw_model_output"])
+            if running_state is None:
+                running_state = None
         else:
             start_idx = 0
             current_doc_id = None
-            running_summary = ""
+            running_state = None
     else:
         start_idx = 0
         current_doc_id = None
-        running_summary = ""
+        running_state = None
 
     records = []
 
@@ -152,32 +187,41 @@ def main():
 
         if row_doc_id != current_doc_id:
             current_doc_id = row_doc_id
-            running_summary = ""
+            running_state = None
 
-        summary_before = running_summary
+        summary_before = (
+            running_state.get("updated_summary", "") if running_state is not None else ""
+        )
+        state_before_json = (
+            json.dumps(running_state, ensure_ascii=False) if running_state is not None else ""
+        )
 
         try:
             result = update_running_summary(
                 llm=llm,
-                current_summary=running_summary,
+                current_state=running_state,
                 new_intervention_text=str(row[args.text_col]) if pd.notna(row[args.text_col]) else "",
-                speaker=str(row[args.speaker_col]) if pd.notna(row[args.speaker_col]) else "Unknown",
-                party=str(row[args.party_col]) if pd.notna(row[args.party_col]) else "Unknown",
+                speaker=str(row[args.speaker_col]) if pd.notna(row[args.speaker_col]) else "Onbekend",
+                party=str(row[args.party_col]) if pd.notna(row[args.party_col]) else "Onbekend",
                 idx=int(row[args.order_col]),
             )
-            running_summary = result["updated_summary"]
+
+            running_state = result
             new_info = json.dumps(result.get("new_information_added", []), ensure_ascii=False)
             raw_output = json.dumps(result, ensure_ascii=False)
+            running_summary_after = result.get("updated_summary", "")
 
         except Exception as e:
             new_info = f"ERROR: {str(e)}"
             raw_output = f"ERROR: {str(e)}"
-            # Keep previous running summary on failure
+            running_summary_after = summary_before
+            # keep previous running_state on failure
 
         record = row.to_dict()
         record["summary_before"] = summary_before
+        record["state_before_json"] = state_before_json
         record["summary_update_info"] = new_info
-        record["running_summary_after"] = running_summary
+        record["running_summary_after"] = running_summary_after
         record["raw_model_output"] = raw_output
         records.append(record)
 

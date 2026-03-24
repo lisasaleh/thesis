@@ -11,33 +11,35 @@ from llm_utils import LocalLLM, extract_json
 
 def build_incremental_summary_prompt(
     current_summary: str,
-    new_intervention_text: str,
     speaker: str,
     party: str,
     idx: int,
-    max_words: int = 180,
+    new_intervention_text: str,
+    max_words: int = 200,
 ) -> str:
     return f"""
-You are assisting with incremental summarization of a parliamentary debate.
+Je helpt bij het incrementeel samenvatten van een parlementair debat.
 
-Task:
-Update the running summary of the debate using the NEW INTERVENTION.
+Doel:
+Werk de lopende samenvatting van het debat bij op basis van de NIEUWE INTERVENTIE, zodat latere interventies goed in hun politieke en argumentatieve context kunnen worden geïnterpreteerd.
 
-Goal:
-Maintain a compact summary of the debate so far that helps interpret future interventions.
+Taak:
+Verwerk de inhoud van de NIEUWE INTERVENTIE in de bestaande samenvatting van het debat tot nu toe.
 
-Instructions:
-- Focus only on substantive political content.
-- Preserve the main topic, positions, disagreements, arguments, and proposals introduced so far.
-- Incorporate any new relevant information from the NEW INTERVENTION.
-- Ignore greetings, procedural remarks, jokes, and rhetorical filler unless they affect the substance of the debate.
-- Keep the summary cumulative but concise.
-- Do not invent information.
-- Write the summary in Dutch.
-- Return valid JSON only.
-- Keep the updated summary under {max_words} words.
+Instructies:
+- Schrijf alles in het Nederlands.
+- Geef alleen geldige JSON terug.
+- Focus uitsluitend op inhoudelijke politieke inhoud.
+- Behoud het hoofdonderwerp van het debat, de standpunten van sprekers en partijen, meningsverschillen, argumenten, voorstellen, bezwaren en relevante reacties.
+- Voeg nieuwe relevante informatie uit de NIEUWE INTERVENTIE toe aan de samenvatting.
+- Laat begroetingen, procedurele opmerkingen, humor en retorische opvulling weg, tenzij ze inhoudelijk relevant zijn voor het politieke standpunt of de argumentatie.
+- Zorg dat de samenvatting cumulatief blijft: belangrijke eerdere informatie mag niet verdwijnen tenzij zij duidelijk irrelevant is geworden.
+- Vat conflicten en verschillen in positie expliciet samen; maak tegengestelde standpunten niet onnodig vaag of algemeen.
+- Geef de voorkeur aan informatiedichtheid en duidelijkheid boven mooie formulering.
+- Verzin geen informatie en trek geen conclusies die niet in de tekst staan.
+- Houd de bijgewerkte samenvatting onder de {max_words} woorden.
 
-JSON schema:
+JSON-schema:
 {{
   "updated_summary": "",
   "new_information_added": [
@@ -45,15 +47,15 @@ JSON schema:
   ]
 }}
 
-CURRENT RUNNING SUMMARY:
-{current_summary if current_summary else "No summary yet."}
+HUIDIGE LOPENDE SAMENVATTING:
+{current_summary if current_summary else "Nog geen samenvatting."}
 
-NEW INTERVENTION METADATA:
-Speaker: {speaker}
-Party: {party}
-Intervention index: {idx}
+METADATA VAN DE NIEUWE INTERVENTIE:
+Spreker: {speaker}
+Partij: {party}
+Interventie-index: {idx}
 
-NEW INTERVENTION:
+NIEUWE INTERVENTIE:
 {new_intervention_text}
 """.strip()
 

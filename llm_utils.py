@@ -62,18 +62,35 @@ class LocalLLM:
 
 def extract_json(text: str) -> Dict[str, Any]:
     text = text.strip()
+
+    # Remove markdown fences
     text = re.sub(r"^```json\s*", "", text)
     text = re.sub(r"^```\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
 
+    # Try full parse first
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
+    # Try extracting first JSON object
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not match:
         raise ValueError(f"No JSON object found in output:\n{text}")
 
     candidate = match.group(0)
-    return json.loads(candidate)
+
+    # First try candidate as-is
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # Simple cleanup: remove trailing commas before ] or }
+    cleaned = re.sub(r",\s*([}\]])", r"\1", candidate)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Could not parse model output as JSON.\nOriginal output:\n{text}\n\nCandidate:\n{candidate}\n\nCleaned:\n{cleaned}\n\nError: {e}")

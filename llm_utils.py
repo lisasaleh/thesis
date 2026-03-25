@@ -12,17 +12,14 @@ class LocalLLM:
         self.model_name = model_name
 
         hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        token_args = {"token": hf_token} if hf_token else {}
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
-            token=hf_token,
-        )
-
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, **token_args)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            token=hf_token,
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
             device_map="auto",
+            **token_args,
         )
 
         if self.tokenizer.pad_token is None:
@@ -37,11 +34,7 @@ class LocalLLM:
             add_generation_prompt=True,
         )
 
-        model_inputs = self.tokenizer(
-            [text],
-            return_tensors="pt",
-        )
-
+        model_inputs = self.tokenizer([text], return_tensors="pt")
         model_inputs = {k: v.to(self.model.device) for k, v in model_inputs.items()}
 
         with torch.no_grad():
@@ -59,48 +52,69 @@ class LocalLLM:
         text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         return text.strip()
 
-def extract_json_with_repair(text: str, llm=None) -> dict:
-    text = text.strip()
 
-    # Remove markdown fences
+def _strip_fences(text: str) -> str:
+    text = text.strip()
     text = re.sub(r"^```json\s*", "", text)
     text = re.sub(r"^```\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
+    return text.strip()
 
-    # Extract JSON candidate
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+
+def extract_json_with_repair(text: str, llm: LocalLLM = None) -> Dict[str, Any]:
+    text = _strip_fences(text)
+
+    match = re.search(r"\{.*", text, flags=re.DOTALL)
     if not match:
         raise ValueError(f"No JSON object found:\n{text}")
 
-    candidate = match.group(0)
+    candidate = match.group(0).strip()
 
-    # First attempt
+    # poging 1: direct
     try:
         return json.loads(candidate)
     except json.JSONDecodeError:
         pass
 
-    # 🔥 SECOND ATTEMPT: repair with LLM
+    # poging 2: simpele normalisatie
+    normalized = candidate
+    normalized = re.sub(r'""', '"', normalized)
+    normalized = re.sub(r",\s*([}\]])", r"\1", normalized)
+
+    try:
+        return json.loads(normalized)
+    except json.JSONDecodeError:
+        pass
+
+    # poging 3: reparatie via LLM
     if llm is not None:
         repair_prompt = f"""
-Fix the following text so that it is valid JSON.
+Maak van onderstaande tekst geldige JSON.
 
-Rules:
-- Return ONLY valid JSON.
-- Do not change the meaning.
-- Do not add or remove fields.
+Regels:
+- Geef alleen geldige JSON terug.
+- Voeg geen uitleg toe.
+- Verander de betekenis niet.
+- Behoud exact dezelfde velden.
+- Sluit alle haken en accolades correct af.
 
-Text:
+Tekst:
 {candidate}
-"""
+""".strip()
 
         repaired = llm.generate(
             prompt=repair_prompt,
-            max_new_tokens=300,
+            max_new_tokens=700,
             temperature=0.0,
         )
+        repaired = _strip_fences(repaired)
 
-        repaired = repaired.strip()
+        match_repaired = re.search(r"\{.*", repaired, flags=re.DOTALL)
+        if match_repaired:
+            repaired = match_repaired.group(0).strip()
+
+        repaired = re.sub(r'""', '"', repaired)
+        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
 
         try:
             return json.loads(repaired)
@@ -109,5 +123,4 @@ Text:
                 f"Repair failed.\nOriginal:\n{candidate}\n\nRepaired:\n{repaired}\n\nError: {e}"
             )
 
-    # If no repair possible
     raise ValueError(f"JSON parsing failed:\n{candidate}")

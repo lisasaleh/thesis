@@ -15,13 +15,13 @@ def build_incremental_summary_prompt(
     party: str,
     idx: int,
     new_intervention_text: str,
-    max_words: int = 400,
+    max_words: int = 150,
 ) -> str:
     return f"""
-Je helpt bij het incrementeel bijhouden van een gestructureerde samenvatting van een Nederlands parlementair debat.
+Je helpt bij het incrementeel bijhouden van een compacte, gestructureerde samenvatting van een Nederlands parlementair debat.
 
 Doel:
-Werk de lopende debatrepresentatie bij op basis van de NIEUWE INTERVENTIE, zodat de output steeds een samenvatting blijft van het GEHELE debat tot nu toe, niet alleen van de meest recente uitwisseling.
+Werk de lopende debatrepresentatie bij op basis van de NIEUWE INTERVENTIE, zodat de output steeds een compacte samenvatting blijft van het GEHELE debat tot nu toe, niet alleen van de meest recente uitwisseling.
 
 BELANGRIJK:
 - Schrijf alle tekst volledig in het Nederlands.
@@ -31,24 +31,25 @@ BELANGRIJK:
 - De samenvatting moet het HELE debat tot nu toe representeren.
 - Het is NIET toegestaan om alleen de laatste interventie samen te vatten.
 - Verwijder eerdere discussiepunten alleen als zij duidelijk niet langer relevant zijn.
-- Als de nieuwe interventie voortbouwt op een bestaand discussiepunt, werk dat punt dan bij in plaats van de samenvatting te vernauwen tot alleen de laatste bijdrage.
+- Als de nieuwe interventie voortbouwt op een bestaand discussiepunt, werk dat punt dan bij.
 
 BELANGRIJK VOOR JSON:
 - Geef EXACT één JSON-object terug.
-- Gebruik GEEN trailing commas.
-- Gebruik GEEN extra tekst buiten JSON.
 - Gebruik standaard JSON-notatie.
 - Gebruik dubbele aanhalingstekens zoals gebruikelijk in JSON.
+- Gebruik GEEN trailing commas.
+- Gebruik GEEN extra tekst buiten JSON.
 
 Instructies:
 - Focus op inhoudelijke politieke inhoud.
 - Negeer begroetingen, procedurele opmerkingen, humor en retorische opvulling, tenzij inhoudelijk relevant.
-- Vat het debat samen als een verzameling terugkerende discussiepunten.
-- Noteer per discussiepunt de belangrijkste argumenten, bezwaren, voorstellen of reacties die tot nu toe zijn genoemd.
-- Zorg dat de uiteindelijke "updated_summary" een compacte samenvatting is van het gehele debat tot nu toe.
-- Gebruik maximaal 4 discussiepunten.
-- Gebruik maximaal 3 argumenten per discussiepunt.
-- Combineer vergelijkbare argumenten.
+- Vat het debat samen als een kleine verzameling terugkerende discussiepunten.
+- Noteer per discussiepunt alleen de belangrijkste argumenten, bezwaren, voorstellen of reacties die tot nu toe zijn genoemd.
+- Gebruik maximaal 3 discussiepunten.
+- Gebruik maximaal 2 argumenten per discussiepunt.
+- Houd argumenten kort en kernachtig.
+- Bewaar alleen de belangrijkste terugkerende inhoudelijke punten.
+- Zorg dat "updated_summary" een compacte samenvatting is van het gehele debat tot nu toe.
 - Houd "updated_summary" onder de {max_words} woorden.
 
 JSON-schema:
@@ -62,10 +63,7 @@ JSON-schema:
       ]
     }}
   ],
-  "updated_summary": "",
-  "new_information_added": [
-    ""
-  ]
+  "updated_summary": ""
 }}
 
 Voorbeeld van correcte uitvoer:
@@ -75,15 +73,12 @@ Voorbeeld van correcte uitvoer:
     {{
       "point": "Proportionaliteit van de maatregel",
       "arguments": [
-        "De minister stelt dat proportionaliteit gewaarborgd is door rechterlijke toetsing.",
-        "Critici vrezen dat de maatregel te ver gaat en mogelijk leidt tot stateloosheid."
+        "De minister stelt dat proportionaliteit gewaarborgd is.",
+        "Critici vrezen dat de maatregel te ver gaat."
       ]
     }}
   ],
-  "updated_summary": "Het debat gaat over de proportionaliteit en rechtsstatelijke legitimiteit van het intrekken van het Nederlanderschap bij terroristische misdrijven.",
-  "new_information_added": [
-    "De minister benadrukt dat het gaat om terroristische misdrijven en geen symptoombestrijding."
-  ]
+  "updated_summary": "Het debat gaat over de proportionaliteit en rechtsstatelijke legitimiteit van het intrekken van het Nederlanderschap bij terroristische misdrijven."
 }}
 
 HUIDIGE LOPENDE DEBATSTAAT:
@@ -100,17 +95,39 @@ NIEUWE INTERVENTIE:
 
 
 def validate_state(parsed: Dict[str, Any]) -> Dict[str, Any]:
-    if "main_topic" not in parsed:
+    if "main_topic" not in parsed or not isinstance(parsed["main_topic"], str):
         parsed["main_topic"] = ""
 
     if "points_of_discussion" not in parsed or not isinstance(parsed["points_of_discussion"], list):
         parsed["points_of_discussion"] = []
 
+    cleaned_points = []
+    for item in parsed["points_of_discussion"]:
+        if not isinstance(item, dict):
+            continue
+
+        point = item.get("point", "")
+        arguments = item.get("arguments", [])
+
+        if not isinstance(point, str):
+            point = str(point)
+
+        if not isinstance(arguments, list):
+            arguments = []
+
+        arguments = [str(a) for a in arguments[:2]]
+        cleaned_points.append({
+            "point": point,
+            "arguments": arguments,
+        })
+
+    parsed["points_of_discussion"] = cleaned_points[:3]
+
     if "updated_summary" not in parsed:
         raise ValueError(f"Missing 'updated_summary' in output: {parsed}")
 
-    if "new_information_added" not in parsed or not isinstance(parsed["new_information_added"], list):
-        parsed["new_information_added"] = []
+    if not isinstance(parsed["updated_summary"], str):
+        parsed["updated_summary"] = str(parsed["updated_summary"])
 
     return parsed
 
@@ -139,11 +156,11 @@ def update_running_summary(
 
     raw_output = llm.generate(
         prompt=prompt,
-        max_new_tokens=400,
+        max_new_tokens=700,
         temperature=0.0,
     )
 
-    parsed = extract_json_with_repair(raw_output, llm=llm)    
+    parsed = extract_json_with_repair(raw_output, llm=llm)
     parsed = validate_state(parsed)
     return parsed
 
@@ -235,20 +252,17 @@ def main():
             )
 
             running_state = result
-            new_info = json.dumps(result.get("new_information_added", []), ensure_ascii=False)
             raw_output = json.dumps(result, ensure_ascii=False)
             running_summary_after = result.get("updated_summary", "")
 
         except Exception as e:
-            new_info = f"ERROR: {str(e)}"
             raw_output = f"ERROR: {str(e)}"
             running_summary_after = summary_before
-            # keep previous running_state on failure
+            # running_state blijft ongewijzigd bij fout
 
         record = row.to_dict()
         record["summary_before"] = summary_before
         record["state_before_json"] = state_before_json
-        record["summary_update_info"] = new_info
         record["running_summary_after"] = running_summary_after
         record["raw_model_output"] = raw_output
         records.append(record)

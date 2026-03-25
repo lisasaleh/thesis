@@ -35,10 +35,10 @@ BELANGRIJK:
 
 BELANGRIJK VOOR JSON:
 - Geef EXACT één JSON-object terug.
-- Gebruik alleen dubbele aanhalingstekens.
 - Gebruik GEEN trailing commas.
 - Gebruik GEEN extra tekst buiten JSON.
-- Strings mogen GEEN ongeëscaleerde dubbele aanhalingstekens bevatten.
+- Gebruik standaard JSON-notatie.
+- Gebruik dubbele aanhalingstekens zoals gebruikelijk in JSON.
 
 Instructies:
 - Focus op inhoudelijke politieke inhoud.
@@ -143,7 +143,7 @@ def update_running_summary(
         temperature=0.0,
     )
 
-    parsed = extract_json(raw_output)
+    parsed = extract_json_with_repair(raw_output, llm=llm)    
     parsed = validate_state(parsed)
     return parsed
 

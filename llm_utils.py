@@ -59,8 +59,7 @@ class LocalLLM:
         text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         return text.strip()
 
-
-def extract_json(text: str) -> Dict[str, Any]:
+def extract_json_with_repair(text: str, llm=None) -> dict:
     text = text.strip()
 
     # Remove markdown fences
@@ -68,29 +67,47 @@ def extract_json(text: str) -> Dict[str, Any]:
     text = re.sub(r"^```\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
 
-    # Try full parse first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Try extracting first JSON object
+    # Extract JSON candidate
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not match:
-        raise ValueError(f"No JSON object found in output:\n{text}")
+        raise ValueError(f"No JSON object found:\n{text}")
 
     candidate = match.group(0)
 
-    # First try candidate as-is
+    # First attempt
     try:
         return json.loads(candidate)
     except json.JSONDecodeError:
         pass
 
-    # Simple cleanup: remove trailing commas before ] or }
-    cleaned = re.sub(r",\s*([}\]])", r"\1", candidate)
+    # 🔥 SECOND ATTEMPT: repair with LLM
+    if llm is not None:
+        repair_prompt = f"""
+Fix the following text so that it is valid JSON.
 
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Could not parse model output as JSON.\nOriginal output:\n{text}\n\nCandidate:\n{candidate}\n\nCleaned:\n{cleaned}\n\nError: {e}")
+Rules:
+- Return ONLY valid JSON.
+- Do not change the meaning.
+- Do not add or remove fields.
+
+Text:
+{candidate}
+"""
+
+        repaired = llm.generate(
+            prompt=repair_prompt,
+            max_new_tokens=300,
+            temperature=0.0,
+        )
+
+        repaired = repaired.strip()
+
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Repair failed.\nOriginal:\n{candidate}\n\nRepaired:\n{repaired}\n\nError: {e}"
+            )
+
+    # If no repair possible
+    raise ValueError(f"JSON parsing failed:\n{candidate}")

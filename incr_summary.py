@@ -15,7 +15,7 @@ def build_incremental_summary_prompt(
     party: str,
     idx: int,
     new_intervention_text: str,
-    max_words: int = 220,
+    max_words: int = 400,
 ) -> str:
     return f"""
 Je helpt bij het incrementeel bijhouden van een gestructureerde samenvatting van een Nederlands parlementair debat.
@@ -27,14 +27,18 @@ BELANGRIJK:
 - Schrijf alle tekst volledig in het Nederlands.
 - Verzin geen informatie.
 - Behoud belangrijke eerdere context.
+- De output moet ALLE relevante eerdere discussiepunten blijven bevatten.
+- De samenvatting moet het HELE debat tot nu toe representeren.
+- Het is NIET toegestaan om alleen de laatste interventie samen te vatten.
 - Verwijder eerdere discussiepunten alleen als zij duidelijk niet langer relevant zijn.
 - Als de nieuwe interventie voortbouwt op een bestaand discussiepunt, werk dat punt dan bij in plaats van de samenvatting te vernauwen tot alleen de laatste bijdrage.
 
 BELANGRIJK VOOR JSON:
-- Gebruik dubbele aanhalingstekens voor alle strings.
-- Escape dubbele aanhalingstekens binnen strings correct.
-- Geef geen tekst voor of na het JSON-object.
-- Geef exact één geldig JSON-object terug.
+- Geef EXACT één JSON-object terug.
+- Gebruik alleen dubbele aanhalingstekens.
+- Gebruik GEEN trailing commas.
+- Gebruik GEEN extra tekst buiten JSON.
+- Strings mogen GEEN ongeëscaleerde dubbele aanhalingstekens bevatten.
 
 Instructies:
 - Focus op inhoudelijke politieke inhoud.
@@ -42,6 +46,9 @@ Instructies:
 - Vat het debat samen als een verzameling terugkerende discussiepunten.
 - Noteer per discussiepunt de belangrijkste argumenten, bezwaren, voorstellen of reacties die tot nu toe zijn genoemd.
 - Zorg dat de uiteindelijke "updated_summary" een compacte samenvatting is van het gehele debat tot nu toe.
+- Gebruik maximaal 4 discussiepunten.
+- Gebruik maximaal 3 argumenten per discussiepunt.
+- Combineer vergelijkbare argumenten.
 - Houd "updated_summary" onder de {max_words} woorden.
 
 JSON-schema:
@@ -58,6 +65,24 @@ JSON-schema:
   "updated_summary": "",
   "new_information_added": [
     ""
+  ]
+}}
+
+Voorbeeld van correcte uitvoer:
+{{
+  "main_topic": "Intrekking van het Nederlanderschap bij terroristische misdrijven",
+  "points_of_discussion": [
+    {{
+      "point": "Proportionaliteit van de maatregel",
+      "arguments": [
+        "De minister stelt dat proportionaliteit gewaarborgd is door rechterlijke toetsing.",
+        "Critici vrezen dat de maatregel te ver gaat en mogelijk leidt tot stateloosheid."
+      ]
+    }}
+  ],
+  "updated_summary": "Het debat gaat over de proportionaliteit en rechtsstatelijke legitimiteit van het intrekken van het Nederlanderschap bij terroristische misdrijven.",
+  "new_information_added": [
+    "De minister benadrukt dat het gaat om terroristische misdrijven en geen symptoombestrijding."
   ]
 }}
 
@@ -114,7 +139,7 @@ def update_running_summary(
 
     raw_output = llm.generate(
         prompt=prompt,
-        max_new_tokens=500,
+        max_new_tokens=400,
         temperature=0.0,
     )
 
@@ -173,8 +198,6 @@ def main():
         if start_idx > 0:
             current_doc_id = done_df.iloc[-1][args.doc_id_col]
             running_state = load_state_from_output_cell(done_df.iloc[-1]["raw_model_output"])
-            if running_state is None:
-                running_state = None
         else:
             start_idx = 0
             current_doc_id = None

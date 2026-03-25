@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 import pandas as pd
 from tqdm import tqdm
 
-from llm_utils import LocalLLM, extract_json
+from llm_utils import LocalLLM, extract_json_with_repair
 
 
 def build_incremental_summary_prompt(

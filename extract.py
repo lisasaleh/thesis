@@ -41,9 +41,7 @@ def flatten_claims_row(row_dict, parsed_output, args):
             "speaker_label": row_dict.get(args.speaker_label_col),
             "claim_idx": idx,
             "quote": claim.get("quote", ""),
-            "claim_type": claim.get("type", ""),
             "normalized": claim.get("normalized", ""),
-            "explanation": claim.get("explanation", "")
         })
 
     return flattened

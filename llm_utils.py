@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import sys
+import time
 from typing import Dict, Any
 
 import torch
@@ -25,7 +27,7 @@ class LocalLLM:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    def generate(self, prompt: str, max_new_tokens: int = 500, temperature: float = 0.0) -> str:
+    def generate(self, prompt: str, max_new_tokens: int = 200, temperature: float = 0.0) -> str:
         messages = [{"role": "user", "content": prompt}]
 
         text = self.tokenizer.apply_chat_template(
@@ -54,19 +56,17 @@ class LocalLLM:
 
     def extract_claims(self, summary: str, intervention_text: str) -> Dict[str, Any]:
         user_prompt = build_claim_extraction_prompt(summary, intervention_text)
-        full_prompt = (
-            f"{CLAIM_EXTRACTION_SYSTEM_PROMPT}\n\n"
-            f"{user_prompt}"
-        )
         full_prompt = f"{CLAIM_EXTRACTION_SYSTEM_PROMPT}\n\n{user_prompt}"
-        n_chars = len(full_prompt)
-        n_input_tokens = len(self.tokenizer(full_prompt)["input_ids"])
-        print(f"[DEBUG] prompt chars={n_chars}, input_tokens={n_input_tokens}")
+
+        print("[DEBUG] Prompt opgebouwd", file=sys.stderr, flush=True)
+
         raw_output = self.generate(
             prompt=full_prompt,
-            max_new_tokens=700,
+            max_new_tokens=200,
             temperature=0.0
         )
+
+        print("[DEBUG] Generatie klaar", file=sys.stderr, flush=True)
 
         parsed = extract_json_with_repair(raw_output, llm=self)
         validated = validate_claim_extraction_output(parsed)
@@ -90,17 +90,18 @@ def extract_json_with_repair(text: str, llm: LocalLLM = None) -> Dict[str, Any]:
 
     match = re.search(r"\{.*", text, flags=re.DOTALL)
     if not match:
-        raise ValueError(f"No JSON object found:\n{text}")
+        raise ValueError(f"Geen JSON-object gevonden:\n{text}")
 
     candidate = match.group(0).strip()
 
+    # Poging 1: direct
     try:
         return json.loads(candidate)
     except json.JSONDecodeError:
         pass
 
+    # Poging 2: kleine normalisaties
     normalized = candidate
-    normalized = re.sub(r'""', '"', normalized)
     normalized = re.sub(r",\s*([}\]])", r"\1", normalized)
 
     try:
@@ -108,6 +109,7 @@ def extract_json_with_repair(text: str, llm: LocalLLM = None) -> Dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
+    # Poging 3: reparatie via het model
     if llm is not None:
         repair_prompt = f"""
 Maak van onderstaande tekst geldige JSON.
@@ -125,7 +127,7 @@ Tekst:
 
         repaired = llm.generate(
             prompt=repair_prompt,
-            max_new_tokens=700,
+            max_new_tokens=200,
             temperature=0.0,
         )
         repaired = _strip_fences(repaired)
@@ -134,17 +136,16 @@ Tekst:
         if match_repaired:
             repaired = match_repaired.group(0).strip()
 
-        repaired = re.sub(r'""', '"', repaired)
         repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
 
         try:
             return json.loads(repaired)
         except json.JSONDecodeError as e:
             raise ValueError(
-                f"Repair failed.\nOriginal:\n{candidate}\n\nRepaired:\n{repaired}\n\nError: {e}"
+                f"JSON-reparatie mislukt.\nOrigineel:\n{candidate}\n\nGerepareerd:\n{repaired}\n\nError: {e}"
             )
 
-    raise ValueError(f"JSON parsing failed:\n{candidate}")
+    raise ValueError(f"JSON parsing mislukt:\n{candidate}")
 
 
 CLAIM_EXTRACTION_SYSTEM_PROMPT = """
@@ -176,15 +177,11 @@ Output:
   "claims": [
     {
       "quote": "Wij steunen dit voorstel",
-      "type": "claim",
-      "normalized": "Wij steunen dit voorstel.",
-      "explanation": "Drukt een standpunt uit."
+      "normalized": "Wij steunen dit voorstel."
     },
     {
       "quote": "het legt te veel druk op gemeenten",
-      "type": "reason",
-      "normalized": "Dit voorstel legt te veel druk op gemeenten.",
-      "explanation": "Geeft een onderbouwing."
+      "normalized": "Dit voorstel legt te veel druk op gemeenten."
     }
   ]
 }
@@ -206,25 +203,21 @@ Je krijgt:
 2. De huidige interventie van de doelpartij.
 
 Doel:
-Extraheer alle minimale argumentatieve eenheden uit ALLEEN de huidige interventie die een van de volgende functies hebben:
-- een politiek standpunt of claim,
-- een reden of onderbouwing,
-- een beoordeling van beleid,
-- een genoemd gevolg of verwachte consequentie,
-- een verdedigde of bestreden positie.
+Extraheer alle minimale argumentatieve eenheden uit ALLEEN de huidige interventie.
 
-Definities:
-- claim: een propositionele uitspraak, stelling, oordeel of positie die betwist of ondersteund kan worden.
-- reason: een premisse, rechtvaardiging of onderbouwing voor of tegen een claim.
+Een argumentatieve eenheid is een tekstfragment dat bijvoorbeeld:
+- een politiek standpunt uitdrukt,
+- een onderbouwing geeft,
+- beleid beoordeelt,
+- een gevolg benoemt,
+- of een positie verdedigt of aanvalt.
 
 Outputformaat:
 {{
   "claims": [
     {{
       "quote": "exact tekstfragment uit de huidige interventie",
-      "type": "claim" of "reason",
-      "normalized": "korte zelfstandige herformulering in het Nederlands",
-      "explanation": "zeer korte uitleg"
+      "normalized": "korte zelfstandige herformulering in het Nederlands"
     }}
   ]
 }}
@@ -234,8 +227,8 @@ Vereisten:
 - Extraheer uitsluitend uit de huidige interventie, nooit uit de samenvatting.
 - "quote" moet exact overeenkomen met tekst uit de huidige interventie.
 - "normalized" moet de quote herschrijven tot een korte, zelfstandige propositie.
-- Houd "explanation" heel kort.
 - Geef uitsluitend geldige JSON terug.
+- Gebruik geen andere velden dan "quote" en "normalized".
 
 Voorbeelden:
 {examples}
@@ -275,27 +268,17 @@ def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
         quote = item.get("quote", "")
-        claim_type = item.get("type", "claim")
         normalized = item.get("normalized", "")
-        explanation = item.get("explanation", "")
 
         if not isinstance(quote, str) or not quote.strip():
             continue
 
-        if claim_type not in {"claim", "reason"}:
-            claim_type = "claim"
-
         if not isinstance(normalized, str):
             normalized = ""
 
-        if not isinstance(explanation, str):
-            explanation = ""
-
         cleaned_claims.append({
             "quote": quote.strip(),
-            "type": claim_type,
-            "normalized": normalized.strip(),
-            "explanation": explanation.strip()
+            "normalized": normalized.strip()
         })
 
     return {"claims": cleaned_claims}

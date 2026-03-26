@@ -58,7 +58,10 @@ class LocalLLM:
             f"{CLAIM_EXTRACTION_SYSTEM_PROMPT}\n\n"
             f"{user_prompt}"
         )
-
+        full_prompt = f"{CLAIM_EXTRACTION_SYSTEM_PROMPT}\n\n{user_prompt}"
+        n_chars = len(full_prompt)
+        n_input_tokens = len(self.tokenizer(full_prompt)["input_ids"])
+        print(f"[DEBUG] prompt chars={n_chars}, input_tokens={n_input_tokens}")
         raw_output = self.generate(
             prompt=full_prompt,
             max_new_tokens=700,

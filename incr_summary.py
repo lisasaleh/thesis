@@ -226,6 +226,8 @@ def main():
 
     records = []
 
+    print(f"Starting from index {start_idx}")
+
     for i in tqdm(range(start_idx, len(df)), total=len(df) - start_idx):
         row = df.iloc[i]
         row_doc_id = row[args.doc_id_col]
@@ -234,6 +236,10 @@ def main():
             current_doc_id = row_doc_id
             running_state = None
 
+        # Extract text safely
+        text = str(row[args.text_col]) if pd.notna(row[args.text_col]) else ""
+        word_count = len(text.split())
+
         summary_before = (
             running_state.get("updated_summary", "") if running_state is not None else ""
         )
@@ -241,30 +247,41 @@ def main():
             json.dumps(running_state, ensure_ascii=False) if running_state is not None else ""
         )
 
-        try:
-            result = update_running_summary(
-                llm=llm,
-                current_state=running_state,
-                new_intervention_text=str(row[args.text_col]) if pd.notna(row[args.text_col]) else "",
-                speaker=str(row[args.speaker_col]) if pd.notna(row[args.speaker_col]) else "Onbekend",
-                party=str(row[args.party_col]) if pd.notna(row[args.party_col]) else "Onbekend",
-                idx=int(row[args.order_col]),
-            )
-
-            running_state = result
-            raw_output = json.dumps(result, ensure_ascii=False)
-            running_summary_after = result.get("updated_summary", "")
-
-        except Exception as e:
-            raw_output = f"ERROR: {str(e)}"
+        if word_count < 15:
             running_summary_after = summary_before
-            # running_state blijft ongewijzigd bij fout
+            raw_output = "SKIPPED: too short"
+            skipped = True
+
+        else:
+            try:
+                result = update_running_summary(
+                    llm=llm,
+                    current_state=running_state,
+                    new_intervention_text=text,
+                    speaker=str(row[args.speaker_col]) if pd.notna(row[args.speaker_col]) else "Onbekend",
+                    party=str(row[args.party_col]) if pd.notna(row[args.party_col]) else "Onbekend",
+                    idx=int(row[args.order_col]),
+                )
+
+                running_state = result
+                raw_output = json.dumps(result, ensure_ascii=False)
+                running_summary_after = result.get("updated_summary", "")
+                skipped = False
+
+            except Exception as e:
+                raw_output = f"ERROR: {str(e)}"
+                running_summary_after = summary_before
+                skipped = False
+                # state remains unchanged
 
         record = row.to_dict()
         record["summary_before"] = summary_before
         record["state_before_json"] = state_before_json
         record["running_summary_after"] = running_summary_after
         record["raw_model_output"] = raw_output
+        record["skipped"] = skipped
+        record["word_count"] = word_count
+
         records.append(record)
 
         if (i + 1) % args.checkpoint_every == 0:

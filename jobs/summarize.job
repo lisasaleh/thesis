@@ -14,6 +14,6 @@ module load Anaconda3/2025.06-1
 source activate thesis
 
 srun python incr_summary.py \
-  --input_csv local_kpa_claims.csv \
-  --output_csv outputs/1_qwen_sample_with_incremental_summary.csv \
+  --input_csv ./data/debate_sample_terrorist.csv \
+  --output_csv outputs/incr_summary_debate_terrorist.csv \
   --model_name Qwen/Qwen2.5-7B-Instruct

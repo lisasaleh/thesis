@@ -41,7 +41,6 @@ def flatten_claims_row(row_dict, parsed_output, args):
             "speaker_label": row_dict.get(args.speaker_label_col),
             "claim_idx": idx,
             "quote": claim.get("quote", ""),
-            "normalized": claim.get("normalized", ""),
         })
 
     return flattened
@@ -61,7 +60,14 @@ def main():
     df = pd.read_csv(args.input_csv)
     df = df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
 
+    if args.target_party is not None:
+        parties = sorted(df[args.party_col].dropna().astype(str).str.strip().unique().tolist())
+        print(f"[DEBUG] target_party={args.target_party}", flush=True)
+        print(f"[DEBUG] unique parties in data={parties}", flush=True)
+
+    print("[DEBUG] Starting model load...", flush=True)
     llm = LocalLLM(args.model_name)
+    print("[DEBUG] Model load finished.", flush=True)
 
     processed_records = []
     flattened_claims = []
@@ -76,11 +82,17 @@ def main():
             claims_df = pd.read_csv(args.output_claims_csv)
             flattened_claims = claims_df.to_dict("records")
 
+        print(f"[DEBUG] Resume enabled | start_idx={start_idx}", flush=True)
+
+    target_party = args.target_party.strip().lower() if args.target_party is not None else None
+
     for i in tqdm(range(start_idx, len(df)), total=len(df) - start_idx):
         row = df.iloc[i]
         row_dict = row.to_dict()
 
-        if args.target_party is not None and row[args.party_col] != args.target_party:
+        row_party = str(row[args.party_col]).strip().lower() if pd.notna(row[args.party_col]) else ""
+
+        if target_party is not None and row_party != target_party:
             row_dict["claim_extraction_raw"] = ""
             row_dict["claim_extraction_json"] = json.dumps({"claims": []}, ensure_ascii=False)
             row_dict["n_claims"] = 0
@@ -90,13 +102,18 @@ def main():
         summary = str(row[args.summary_col]) if pd.notna(row[args.summary_col]) else ""
         text = str(row[args.text_col]) if pd.notna(row[args.text_col]) else ""
 
+        print(
+            f"[DEBUG] Processing row={i} | doc_id={row_dict.get(args.doc_id_col)} | intervention_id={row_dict.get(args.order_col)}",
+            flush=True
+        )
+
         try:
             result = llm.extract_claims(summary=summary, intervention_text=text)
             parsed_output = result["parsed_output"]
             raw_output = result["raw_model_output"]
         except Exception as e:
-            parsed_output = {"claims": []}
-            raw_output = f"ERROR: {str(e)}"
+            print(f"[ERROR] Failed on row {i}: {e}", flush=True)
+            raise
 
         row_dict["claim_extraction_raw"] = raw_output
         row_dict["claim_extraction_json"] = json.dumps(parsed_output, ensure_ascii=False)
@@ -112,6 +129,8 @@ def main():
 
     pd.DataFrame(processed_records).to_csv(args.output_csv, index=False)
     pd.DataFrame(flattened_claims).to_csv(args.output_claims_csv, index=False)
+
+    print("[DEBUG] Extraction finished successfully.", flush=True)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@ import json
 import os
 import re
 import sys
-import time
 from typing import Dict, Any
 
 import torch
@@ -13,10 +12,19 @@ class LocalLLM:
     def __init__(self, model_name: str):
         self.model_name = model_name
 
+        print(f"[DEBUG] Loading tokenizer for model: {model_name}", file=sys.stderr, flush=True)
+
         hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
         token_args = {"token": hf_token} if hf_token else {}
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, **token_args)
+
+        print(
+            f"[DEBUG] Loading model for: {model_name} | cuda={torch.cuda.is_available()}",
+            file=sys.stderr,
+            flush=True,
+        )
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
@@ -27,6 +35,8 @@ class LocalLLM:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+        print("[DEBUG] Model + tokenizer ready", file=sys.stderr, flush=True)
+
     def generate(self, prompt: str, max_new_tokens: int = 200, temperature: float = 0.0) -> str:
         messages = [{"role": "user", "content": prompt}]
 
@@ -36,8 +46,21 @@ class LocalLLM:
             add_generation_prompt=True,
         )
 
+        print(
+            f"[DEBUG] Prompt tokenization start | prompt_chars={len(prompt)}",
+            file=sys.stderr,
+            flush=True,
+        )
+
         model_inputs = self.tokenizer([text], return_tensors="pt")
         model_inputs = {k: v.to(self.model.device) for k, v in model_inputs.items()}
+
+        input_len = model_inputs["input_ids"].shape[1]
+        print(
+            f"[DEBUG] Generation start | input_tokens={input_len} | max_new_tokens={max_new_tokens}",
+            file=sys.stderr,
+            flush=True,
+        )
 
         with torch.no_grad():
             output_ids = self.model.generate(
@@ -49,16 +72,17 @@ class LocalLLM:
                 eos_token_id=self.tokenizer.eos_token_id,
             )
 
-        input_length = model_inputs["input_ids"].shape[1]
-        generated_ids = output_ids[0][input_length:]
+        generated_ids = output_ids[0][input_len:]
         text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+        print("[DEBUG] Generation finished", file=sys.stderr, flush=True)
         return text.strip()
 
     def extract_claims(self, summary: str, intervention_text: str) -> Dict[str, Any]:
         user_prompt = build_claim_extraction_prompt(summary, intervention_text)
         full_prompt = f"{CLAIM_EXTRACTION_SYSTEM_PROMPT}\n\n{user_prompt}"
 
-        print("[DEBUG] Prompt opgebouwd", file=sys.stderr, flush=True)
+        print("[DEBUG] Claim extraction prompt built", file=sys.stderr, flush=True)
 
         raw_output = self.generate(
             prompt=full_prompt,
@@ -66,7 +90,7 @@ class LocalLLM:
             temperature=0.0
         )
 
-        print("[DEBUG] Generatie klaar", file=sys.stderr, flush=True)
+        print("[DEBUG] Raw generation received", file=sys.stderr, flush=True)
 
         parsed = extract_json_with_repair(raw_output, llm=self)
         validated = validate_claim_extraction_output(parsed)
@@ -94,22 +118,21 @@ def extract_json_with_repair(text: str, llm: LocalLLM = None) -> Dict[str, Any]:
 
     candidate = match.group(0).strip()
 
-    # Poging 1: direct
+    # Attempt 1: direct parse
     try:
         return json.loads(candidate)
     except json.JSONDecodeError:
         pass
 
-    # Poging 2: kleine normalisaties
-    normalized = candidate
-    normalized = re.sub(r",\s*([}\]])", r"\1", normalized)
+    # Attempt 2: light normalization
+    normalized = re.sub(r",\s*([}\]])", r"\1", candidate)
 
     try:
         return json.loads(normalized)
     except json.JSONDecodeError:
         pass
 
-    # Poging 3: reparatie via het model
+    # Attempt 3: repair via model
     if llm is not None:
         repair_prompt = f"""
 Maak van onderstaande tekst geldige JSON.
@@ -162,6 +185,7 @@ Regels:
 - Verzin geen tekst.
 - Geef de voorkeur aan korte, inhoudelijke argumentatieve eenheden boven lange passages.
 - Een eenheid mag een volledige zin zijn, maar ook een deelzin of kort tekstfragment.
+- Extraheer alleen fragmenten met inhoudelijke argumentatieve waarde.
 - Negeer begroetingen, procedurele opmerkingen, grapjes, tussenwerpsels en herhalingen zonder inhoudelijke argumentatieve waarde.
 - Geef uitsluitend geldige JSON terug, zonder toelichting of extra tekst.
 """.strip()
@@ -176,12 +200,10 @@ Output:
 {
   "claims": [
     {
-      "quote": "Wij steunen dit voorstel",
-      "normalized": "Wij steunen dit voorstel."
+      "quote": "Wij steunen dit voorstel"
     },
     {
-      "quote": "het legt te veel druk op gemeenten",
-      "normalized": "Dit voorstel legt te veel druk op gemeenten."
+      "quote": "het legt te veel druk op gemeenten"
     }
   ]
 }
@@ -216,8 +238,7 @@ Outputformaat:
 {{
   "claims": [
     {{
-      "quote": "exact tekstfragment uit de huidige interventie",
-      "normalized": "korte zelfstandige herformulering in het Nederlands"
+      "quote": "exact tekstfragment uit de huidige interventie"
     }}
   ]
 }}
@@ -226,9 +247,8 @@ Vereisten:
 - Als er geen argumentatieve eenheden aanwezig zijn, geef dan {{"claims": []}} terug.
 - Extraheer uitsluitend uit de huidige interventie, nooit uit de samenvatting.
 - "quote" moet exact overeenkomen met tekst uit de huidige interventie.
-- "normalized" moet de quote herschrijven tot een korte, zelfstandige propositie.
 - Geef uitsluitend geldige JSON terug.
-- Gebruik geen andere velden dan "quote" en "normalized".
+- Gebruik geen andere velden dan "quote".
 
 Voorbeelden:
 {examples}
@@ -268,17 +288,12 @@ def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
         quote = item.get("quote", "")
-        normalized = item.get("normalized", "")
 
         if not isinstance(quote, str) or not quote.strip():
             continue
 
-        if not isinstance(normalized, str):
-            normalized = ""
-
         cleaned_claims.append({
-            "quote": quote.strip(),
-            "normalized": normalized.strip()
+            "quote": quote.strip()
         })
 
     return {"claims": cleaned_claims}

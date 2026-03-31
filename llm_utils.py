@@ -100,8 +100,8 @@ class LocalLLM:
         print("[DEBUG] Generation finished", file=sys.stderr, flush=True)
         return text.strip()
 
-    def extract_claims(self, summary: str, intervention_text: str) -> Dict[str, Any]:
-        user_prompt = build_claim_extraction_prompt(summary, intervention_text)
+    def extract_claims(self, intervention_text: str) -> Dict[str, Any]:
+        user_prompt = build_claim_extraction_prompt(intervention_text)
 
         raw_output = self.generate(
             prompt=user_prompt,
@@ -119,7 +119,6 @@ class LocalLLM:
             "raw_model_output": raw_output,
             "parsed_output": validated
         }
-
 
 def _strip_fences(text: str) -> str:
     text = text.strip()

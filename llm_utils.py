@@ -37,8 +37,12 @@ class LocalLLM:
 
         print("[DEBUG] Model + tokenizer ready", file=sys.stderr, flush=True)
 
-    def generate(self, prompt: str, max_new_tokens: int = 200, temperature: float = 0.0) -> str:
-        messages = [{"role": "user", "content": prompt}]
+    def generate(self, prompt: str, system_prompt: str = None, max_new_tokens: int = 512, temperature: float = 0.0) -> str:
+        messages = []
+
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
 
         text = self.tokenizer.apply_chat_template(
             messages,
@@ -80,12 +84,10 @@ class LocalLLM:
 
     def extract_claims(self, summary: str, intervention_text: str) -> Dict[str, Any]:
         user_prompt = build_claim_extraction_prompt(summary, intervention_text)
-        full_prompt = f"{CLAIM_EXTRACTION_SYSTEM_PROMPT}\n\n{user_prompt}"
-
-        print("[DEBUG] Claim extraction prompt built", file=sys.stderr, flush=True)
 
         raw_output = self.generate(
-            prompt=full_prompt,
+            prompt=user_prompt,
+            system_prompt=CLAIM_EXTRACTION_SYSTEM_PROMPT,
             max_new_tokens=200,
             temperature=0.0
         )

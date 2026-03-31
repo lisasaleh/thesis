@@ -189,12 +189,11 @@ Tekst:
 
     raise ValueError(f"JSON parsing mislukt:\n{candidate}")
 
-
 CLAIM_EXTRACTION_SYSTEM_PROMPT = """
 Je bent een annotator van parlementaire tekst.
 
 Taak:
-extraheer minimale argumentatieve tekstfragmenten uit de huidige interventie.
+extraheer alle minimale argumentatieve tekstfragmenten uit de huidige interventie.
 
 Regels:
 - Extraheer alleen tekstfragmenten uit de interventie die je krijgt.
@@ -202,12 +201,15 @@ Regels:
 - Vat niets samen.
 - Normaliseer niets.
 - Geef alleen exacte tekstfragmenten terug.
+- Extraheer ALLE afzonderlijke argumentatieve eenheden, niet slechts enkele voorbeelden.
+- Splits lange zinnen op in meerdere fragmenten als ze meerdere argumenten of conclusies bevatten.
+- Geef de voorkeur aan juridische, beleidsmatige en redenerende claims boven retorische inkleding of illustratieve voorbeelden.
+- Neem expliciete conclusies met signaalwoorden zoals "dus", "daarmee", "bovendien", "precies hetzelfde", "er is geen verschil", "dat betekent" afzonderlijk op wanneer ze argumentatieve waarde hebben.
 - Een fragment mag een volledige zin zijn, maar ook een deelzin of korte frase.
 - Kies de kleinst mogelijke fragmenten die nog zelfstandig argumentatieve betekenis hebben.
 - Negeer begroetingen, procedurele opmerkingen, grapjes en inhoudsloze herhaling.
 - Geef uitsluitend geldige JSON terug.
 - Gebruik alleen het veld "quote".
-- Splits lange zinnen op in meerdere fragmenten als ze meerdere argumenten bevatten.
 """.strip()
 
 
@@ -233,31 +235,36 @@ Output:
 Als er geen argumentatieve fragmenten zijn:
 {{"claims": []}}
 
+Voorbeeld:
+{examples}
+
 Interventie:
 \"\"\"
 {text}
 \"\"\"
 """.strip()
 
-# CLAIM_EXTRACTION_EXAMPLES = """
-# Voorbeeld:
+CLAIM_EXTRACTION_EXAMPLES = """
+Voorbeeld:
 
-# Interventie:
-# "Wij steunen dit voorstel, maar het legt te veel druk op gemeenten."
+Interventie:
+"Wij vinden dat deze maatregel noodzakelijk is, omdat hij de veiligheid vergroot. Bovendien is er geen minder ingrijpend alternatief beschikbaar, dus het is gerechtvaardigd om deze stap te nemen."
 
-# Output:
-# {
-#   "claims": [
-#     {"quote": "Wij steunen dit voorstel"},
-#     {"quote": "het legt te veel druk op gemeenten"}
-#   ]
-# }
-# """.strip()
-
+Output:
+{{
+  "claims": [
+    {{"quote": "deze maatregel noodzakelijk is"}},
+    {{"quote": "hij de veiligheid vergroot"}},
+    {{"quote": "er geen minder ingrijpend alternatief beschikbaar is"}},
+    {{"quote": "het is gerechtvaardigd om deze stap te nemen"}}
+  ]
+}}
+""".strip()
 
 def build_claim_extraction_prompt(text: str) -> str:
     return CLAIM_EXTRACTION_USER_PROMPT_TEMPLATE.format(
-        text=text.strip()
+        text=text.strip(),
+        examples=CLAIM_EXTRACTION_EXAMPLES
     )
 
 def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:

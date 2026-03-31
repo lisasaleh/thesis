@@ -5,7 +5,7 @@ import sys
 from typing import Dict, Any
 
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 
 class LocalLLM:
@@ -25,12 +25,30 @@ class LocalLLM:
             flush=True,
         )
 
+        # ADD: 4-bit quantization config
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,   # saves a bit of extra memory
+            bnb_4bit_quant_type="nf4",        # best quality for 4-bit
+        )
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
             device_map="auto",
+            quantization_config=quantization_config,
             **token_args,
         )
+
+        # ADD: sanity check — fail fast if anything is still on CPU
+        for name, param in self.model.named_parameters():
+            if param.device.type == "cpu":
+                raise RuntimeError(
+                    f"Parameter '{name}' is still on CPU after quantization. "
+                    "Not enough VRAM — try fewer GPUs layers or a smaller model."
+                )
+
+        print("[DEBUG] Model + tokenizer ready", file=sys.stderr, flush=True)
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token

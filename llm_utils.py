@@ -25,19 +25,19 @@ class LocalLLM:
             flush=True,
         )
 
-        # ADD: 4-bit quantization config
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,   # saves a bit of extra memory
-            bnb_4bit_quant_type="nf4",        # best quality for 4-bit
-        )
+        # # ADD: 4-bit quantization config
+        # quantization_config = BitsAndBytesConfig(
+        #     load_in_4bit=True,
+        #     bnb_4bit_compute_dtype=torch.bfloat16,
+        #     bnb_4bit_use_double_quant=True,   # saves a bit of extra memory
+        #     bnb_4bit_quant_type="nf4",        # best quality for 4-bit
+        # )
 
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="auto",
-            quantization_config=quantization_config,
-            **token_args,
+            dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            **token_args
         )
 
         # ADD: sanity check — fail fast if anything is still on CPU
@@ -192,96 +192,72 @@ Tekst:
 
 
 CLAIM_EXTRACTION_SYSTEM_PROMPT = """
-Je bent een deskundige analist van parlementaire debatten en argumentatie.
+Je bent een annotator van parlementaire tekst.
 
-Je taak is om minimale argumentatieve tekstfragmenten te extraheren uit ALLEEN de HUIDIGE interventie.
+Taak:
+extraheer minimale argumentatieve tekstfragmenten uit de huidige interventie.
 
-Regels:
-- Gebruik de samenvatting alleen als context voor interpretatie.
-- Extraheer fragmenten ALLEEN uit de huidige interventie.
-- Kopieer NOOIT tekst uit de samenvatting.
-- De samenvatting is ALLEEN bedoeld als context.
-- Bewaar de oorspronkelijke formulering exact in het veld "quote".
-- Verzin geen tekst.
-- Geef de voorkeur aan korte, inhoudelijke argumentatieve eenheden boven lange passages.
-- Een eenheid mag een volledige zin zijn, maar ook een deelzin of kort tekstfragment.
-- Extraheer alleen fragmenten met inhoudelijke argumentatieve waarde.
-- Negeer begroetingen, procedurele opmerkingen, grapjes, tussenwerpsels en herhalingen zonder inhoudelijke argumentatieve waarde.
-- Geef uitsluitend geldige JSON terug, zonder toelichting of extra tekst.
+Belangrijke regels:
+- Extraheer alleen tekstfragmenten uit de interventie die je krijgt.
+- Herschrijf niets.
+- Vat niets samen.
+- Normaliseer niets.
+- Geef alleen exacte tekstfragmenten terug.
+- Een fragment mag een volledige zin zijn, maar ook een deelzin of korte frase.
+- Kies de kleinst mogelijke fragmenten die nog zelfstandig argumentatieve betekenis hebben.
+- Negeer begroetingen, procedurele opmerkingen, grapjes en inhoudsloze herhaling.
+- Geef uitsluitend geldige JSON terug.
+- Gebruik alleen het veld "quote".
+""".strip()
+
+
+CLAIM_EXTRACTION_USER_PROMPT_TEMPLATE = """
+Extraheer de minimale argumentatieve tekstfragmenten uit deze interventie.
+
+Wat telt als argumentatief:
+- een standpunt
+- een reden of onderbouwing
+- een beoordeling van beleid of voorstel
+- een genoemd gevolg
+- een aanval op of verdediging van een positie
+
+Wat je NIET moet doen:
+- niet samenvatten
+- niet herschrijven
+- niet uitleggen
+- niet normaliseren
+- geen tekst toevoegen
+
+Geef output in precies dit formaat:
+{
+  "claims": [
+    {"quote": "exact tekstfragment uit de interventie"}
+  ]
+}
+
+Als er geen argumentatieve fragmenten zijn, geef dan terug:
+{"claims": []}
+
+Interventie:
+\"\"\"
+{text}
+\"\"\"
 """.strip()
 
 
 CLAIM_EXTRACTION_EXAMPLES = """
-Voorbeeld 1
-Huidige interventie:
+Voorbeeld:
+
+Interventie:
 "Wij steunen dit voorstel, maar het legt te veel druk op gemeenten."
 
 Output:
 {
   "claims": [
-    {
-      "quote": "Wij steunen dit voorstel"
-    },
-    {
-      "quote": "het legt te veel druk op gemeenten"
-    }
+    {"quote": "Wij steunen dit voorstel"},
+    {"quote": "het legt te veel druk op gemeenten"}
   ]
 }
-
-Voorbeeld 2
-Huidige interventie:
-"Dank u wel, voorzitter. Ik zal het kort houden."
-
-Output:
-{
-  "claims": []
-}
-""".strip()
-
-
-CLAIM_EXTRACTION_USER_PROMPT_TEMPLATE = """
-Je krijgt:
-1. Een samenvatting van het debat tot vlak vóór de huidige interventie.
-2. De huidige interventie van de doelpartij.
-
-Doel:
-Extraheer alle minimale argumentatieve eenheden uit ALLEEN de huidige interventie.
-
-Een argumentatieve eenheid is een tekstfragment dat bijvoorbeeld:
-- een politiek standpunt uitdrukt,
-- een onderbouwing geeft,
-- beleid beoordeelt,
-- een gevolg benoemt,
-- of een positie verdedigt of aanvalt.
-
-Outputformaat:
-{{
-  "claims": [
-    {{
-      "quote": "exact tekstfragment uit de huidige interventie"
-    }}
-  ]
-}}
-
-Vereisten:
-- Als er geen argumentatieve eenheden aanwezig zijn, geef dan {{"claims": []}} terug.
-- Extraheer uitsluitend uit de huidige interventie, nooit uit de samenvatting.
-- "quote" moet exact overeenkomen met tekst uit de huidige interventie.
-- Geef uitsluitend geldige JSON terug.
-- Gebruik geen andere velden dan "quote".
-
-Voorbeelden:
-{examples}
-
-Samenvatting vóór de huidige interventie:
-\"\"\"
-{summary}
-\"\"\"
-
-Huidige interventie:
-\"\"\"
-{text}
-\"\"\"
 """.strip()
 
 

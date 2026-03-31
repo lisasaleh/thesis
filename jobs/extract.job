@@ -19,5 +19,5 @@ srun python extract.py \
   --input_csv outputs/incr_summary_debate_terrorist.csv \
   --output_csv outputs/extracted_rows.csv \
   --output_claims_csv outputs/extracted_claims.csv \
-  --model_name Qwen/Qwen2.5-72B-Instruct \
+  --model_name Qwen/Qwen2.5-7B-Instruct \
   --target_party VVD

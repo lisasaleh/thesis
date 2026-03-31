@@ -106,7 +106,7 @@ class LocalLLM:
         raw_output = self.generate(
             prompt=user_prompt,
             system_prompt=CLAIM_EXTRACTION_SYSTEM_PROMPT,
-            max_new_tokens=200,
+            max_new_tokens=512,
             temperature=0.0
         )
 
@@ -169,7 +169,7 @@ Tekst:
 
         repaired = llm.generate(
             prompt=repair_prompt,
-            max_new_tokens=200,
+            max_new_tokens=512,
             temperature=0.0,
         )
         repaired = _strip_fences(repaired)

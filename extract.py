@@ -108,7 +108,7 @@ def main():
         )
 
         try:
-            result = llm.extract_claims(summary=summary, intervention_text=text)
+            result = llm.extract_claims(intervention_text=text)
             parsed_output = result["parsed_output"]
             raw_output = result["raw_model_output"]
         except Exception as e:

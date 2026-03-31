@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=gpu_mig
 #SBATCH --gpus=1
-#SBATCH --job-name=incSummary
+#SBATCH --job-name=extract
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=02:00:00
@@ -12,6 +12,8 @@ module load 2025
 module load Anaconda3/2025.06-1
 
 source activate thesis
+
+python -m pip install -U bitsandbytes>=0.46.1
 
 srun python extract.py \
   --input_csv outputs/incr_summary_debate_terrorist.csv \

@@ -15,5 +15,6 @@ source activate thesis
 
 srun python incr_summary.py \
   --input_csv ./data/debate_sample_terrorist.csv \
-  --output_csv outputs/incr_summary_debate_terrorist.csv \
-  --model_name Qwen/Qwen2.5-7B-Instruct
+  --output_dir outputs/ \
+  --model_name Qwen/Qwen2.5-7B-Instruct \
+  --add_timestamp

@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 from typing import Optional, Dict, Any
+from datetime import datetime
 
 import pandas as pd
 from tqdm import tqdm
@@ -100,7 +101,7 @@ def update_running_summary(
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_csv", type=str, required=True)
-    parser.add_argument("--output_csv", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--model_name", type=str, required=True)
 
     parser.add_argument("--doc_id_col", type=str, default="document_id")
@@ -111,6 +112,7 @@ def parse_args():
 
     parser.add_argument("--checkpoint_every", type=int, default=25)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
     parser.add_argument("--max_words", type=int, default=250)
 
     return parser.parse_args()
@@ -135,7 +137,13 @@ def load_state_from_output_cell(cell_value: Any) -> Optional[Dict[str, Any]]:
 def main():
     args = parse_args()
 
-    output_dir = os.path.dirname(args.output_csv)
+    # Generate output CSV with optional timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
+    timestamp_str = f"_{timestamp}" if timestamp else ""
+    base_name = args.input_csv.split("/")[-1].replace(".csv", f"_summary{timestamp_str}.csv")
+    output_csv = os.path.join(os.path.dirname(args.output_dir), base_name)
+
+    output_dir = os.path.dirname(output_csv)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
@@ -146,8 +154,8 @@ def main():
     llm = LocalLLM(args.model_name)
     print("[DEBUG] Model load finished.", flush=True)
 
-    if args.resume and os.path.exists(args.output_csv):
-        done_df = pd.read_csv(args.output_csv)
+    if args.resume and os.path.exists(output_csv):
+        done_df = pd.read_csv(output_csv)
         start_idx = len(done_df)
 
         if start_idx > 0:
@@ -223,27 +231,27 @@ def main():
         records.append(record)
 
         if (i + 1) % args.checkpoint_every == 0:
-            if args.resume and os.path.exists(args.output_csv):
-                prev_df = pd.read_csv(args.output_csv)
+            if args.resume and os.path.exists(output_csv):
+                prev_df = pd.read_csv(output_csv)
                 out_df = pd.concat([prev_df, pd.DataFrame(records)], ignore_index=True)
             else:
                 prefix_df = df.iloc[:start_idx].copy() if start_idx > 0 else pd.DataFrame()
                 out_df = pd.concat([prefix_df, pd.DataFrame(records)], ignore_index=True)
 
-            out_df.to_csv(args.output_csv, index=False)
+            out_df.to_csv(output_csv, index=False)
             records = []
 
     if records:
-        if args.resume and os.path.exists(args.output_csv):
-            prev_df = pd.read_csv(args.output_csv)
+        if args.resume and os.path.exists(output_csv):
+            prev_df = pd.read_csv(output_csv)
             out_df = pd.concat([prev_df, pd.DataFrame(records)], ignore_index=True)
         else:
             prefix_df = df.iloc[:start_idx].copy() if start_idx > 0 else pd.DataFrame()
             out_df = pd.concat([prefix_df, pd.DataFrame(records)], ignore_index=True)
 
-        out_df.to_csv(args.output_csv, index=False)
+        out_df.to_csv(output_csv, index=False)
 
-    print(f"[DEBUG] Saved output to {args.output_csv}", flush=True)
+    print(f"[DEBUG] Saved output to {output_csv}", flush=True)
 
 
 if __name__ == "__main__":

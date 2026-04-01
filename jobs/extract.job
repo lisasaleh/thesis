@@ -18,4 +18,5 @@ srun python extract.py \
   --output_dir outputs/ \
   --output_claims_csv outputs/ \
   --model_name Qwen/Qwen2.5-7B-Instruct \
-  --target_party VVD
+  --target_party VVD \
+  --add_timestamp

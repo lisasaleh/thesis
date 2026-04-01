@@ -29,6 +29,7 @@ def parse_args():
 
     parser.add_argument("--target_party", type=str, default=None)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
 
     return parser.parse_args()
 
@@ -95,10 +96,11 @@ def main():
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_name = args.target_party + args.input_csv.split("/")[-1].replace(".csv", f"_{timestamp}.csv")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
+    timestamp_str = f"_{timestamp}" if timestamp else ""
+    base_name = args.target_party + args.input_csv.split("/")[-1].replace(".csv", f"{timestamp_str}.csv")
     output_csv = base_name
-    claims_name = base_name.replace(".csv", "_claims.csv")
+    claims_name = base_name.replace(".csv", f"_claims.csv")
     output_csv_path = os.path.join(args.output_dir, output_csv)
     output_claims_csv = os.path.join(args.output_dir, claims_name)
 

@@ -99,9 +99,11 @@ def normalize_single_quote(
     raw_output = llm.generate(
         prompt=user_prompt,
         system_prompt=NORMALIZATION_SYSTEM_PROMPT,
-        max_new_tokens=120,
+        max_new_tokens=300,
         temperature=0.0,
     )
+
+    print(f"[DEBUG_RAW_OUTPUT] {repr(raw_output[:200])}", flush=True)
 
     parsed = extract_json_with_basic_repair(raw_output)
     validated = validate_normalization_output(parsed)
@@ -215,8 +217,7 @@ def main():
 
         processed_records.append(row_dict)
 
-        temp_flat = flatten_normalized_row(row_dict, parsed_output, args)
-        flattened_points.extend(temp_flat)
+        flattened_points.extend(flatten_normalized_row(row_dict, parsed_output, args))
 
         # Incremental saving at checkpoints (safe for crashes)
         if (i + 1 - start_idx) % args.checkpoint_every == 0:

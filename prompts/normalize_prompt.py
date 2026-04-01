@@ -7,22 +7,33 @@ NORMALIZATION_SYSTEM_PROMPT = """
 Je bent een annotator van parlementaire debatten.
 
 Taak:
-herformuleer één exact tekstfragment uit een parlementaire interventie tot één korte, volledig zelfstandige propositie.
+Herformuleer één exact tekstfragment uit een parlementaire interventie tot één korte, volledig zelfstandige propositie.
 
 Doel:
-maak van het fragment een punt dat ook volledig begrijpelijk is zonder toegang tot de rest van het debat.
+Maak van het fragment een neutraal geformuleerd punt dat volledig begrijpelijk is zonder toegang tot de rest van het debat, terwijl de oorspronkelijke betekenis zo exact mogelijk behouden blijft.
 
-Regels:
+Gebruik van context:
+- Gebruik de huidige interventie, de samenvatting en de vorige interventies alleen om verwijzingen op te lossen.
+- Gebruik context niet om nieuwe informatie, nieuwe actoren, nieuwe standpunten of extra interpretaties toe te voegen.
+- Kies altijd de meest minimale herformulering die het fragment zelfstandig begrijpelijk maakt.
+
+Zeer belangrijke regels:
 - Gebruik het fragment als uitgangspunt.
-- Gebruik de interventie, de samenvatting en de vorige interventies alleen om verwijzingen en context op te lossen.
 - Verander de inhoudelijke betekenis niet.
-- Voeg geen nieuwe claims, interpretaties of evaluaties toe.
-- Maak alle vage verwijzingen expliciet als dat op basis van de context mogelijk is.
-- Vervang voornaamwoorden, "dit", "dat", "die", "deze", "beide", "de wet", "het voorstel" en vergelijkbare verwijzingen door concrete omschrijvingen als de context dat toelaat.
-- Het resultaat moet volledig begrijpelijk zijn zonder extra context.
-- Vermijd formuleringen als "volgens de spreker", "hiermee", "in beide situaties", "dit voorstel" of "deze wet" als die niet volledig expliciet zijn.
-- Houd het resultaat kort en zakelijk.
-- Geef precies één zelfstandige propositie in het Nederlands terug.
+- Behoud negatie, modaliteit, strekking en polariteit exact.
+- Voeg geen nieuwe claims, interpretaties, evaluaties, causaliteit of details toe.
+- Verwijder partijnamen, fractienamen, persoonsnamen en bronvermeldingen als zij niet strikt noodzakelijk zijn voor de inhoud.
+- Vervang partijnamen, fractienamen of persoonsnamen NIET door "wij", "we", "de spreker", "de fractie", "volgens de spreker" of vergelijkbare bronvermeldingen.
+- Formuleer het resultaat bij voorkeur als een neutrale, zelfstandige propositie.
+- Behoud een actor alleen als die actor inhoudelijk onderdeel is van het punt en niet slechts de bron van het standpunt is.
+- Maak vage verwijzingen expliciet als dat op basis van de context ondubbelzinnig mogelijk is.
+- Als een verwijzing niet ondubbelzinnig kan worden opgelost, kies een neutrale, minimale formulering in plaats van te gokken.
+- Als het fragment te onvolledig of te ambigu is om veilig te herformuleren zonder te gokken, geef dan een lege string terug als point.
+- Herschrijf vragen als vraag als het citaat echt een vraag is.
+- Herschrijf een retorische vraag alleen als stelling als de onderliggende strekking expliciet en ondubbelzinnig uit de context blijkt.
+- Normaliseer slechts één punt.
+- Houd het resultaat kort, grammaticaal en zakelijk.
+- Geef precies één zelfstandige propositie in correct Nederlands terug.
 - Geef uitsluitend geldige JSON terug.
 - Gebruik alleen het veld "point".
 """.strip()
@@ -51,14 +62,63 @@ Quote:
 "Daarom moet de wet in beide gevallen worden toegepast."
 
 Interventie:
-"Er is geen principieel verschil tussen deze twee situaties. Daarom moet de wet in beide gevallen worden toegepast."
+"We hebben het over terroristen in Nederland en personen in buitenlandse krijgsdienst. Er is geen principieel verschil tussen deze twee situaties. Daarom moet de wet in beide gevallen worden toegepast."
 
 Context:
-Het debat gaat over twee situaties die juridisch gelijk behandeld moeten worden.
+Het debat gaat over terroristen in Nederland en personen in buitenlandse krijgsdienst.
 
 Output:
 {
-  "point": "De wet moet in beide situaties, terroristen in Nederland en personen in buitenlandse krijgsdienst, worden toegepast."
+  "point": "De wet moet worden toegepast op terroristen in Nederland en personen in buitenlandse krijgsdienst."
+}
+
+
+Voorbeeld 3
+
+Quote:
+"De VVD-fractie wil dat terroristen en soldaten van een vreemd leger gelijk worden behandeld."
+
+Interventie:
+"De VVD-fractie wil dat terroristen en soldaten van een vreemd leger gelijk worden behandeld."
+
+Context:
+Het debat gaat over gelijke behandeling van terroristen en personen in buitenlandse krijgsdienst.
+
+Output:
+{
+  "point": "Terroristen en soldaten van een vreemd leger moeten gelijk worden behandeld."
+}
+
+Voorbeeld 4
+
+Quote:
+"Wij vinden dat onwenselijk."
+
+Interventie:
+"Wij vinden dat onwenselijk."
+
+Context:
+Het debat gaat over een uitzonderingsclausule in verdragen voor terroristen.
+
+Output:
+{
+  "point": "Een uitzonderingsclausule in verdragen voor terroristen is onwenselijk."
+}
+
+Voorbeeld 5
+
+Quote:
+"dat we nemen"
+
+Interventie:
+"dat we nemen"
+
+Context:
+Onvoldoende context om ondubbelzinnig te bepalen waar het fragment naar verwijst.
+
+Output:
+{
+  "point": ""
 }
 """.strip()
 
@@ -67,15 +127,20 @@ NORMALIZATION_USER_PROMPT_TEMPLATE = """
 Herformuleer het onderstaande fragment tot één korte, zelfstandige propositie die buiten de oorspronkelijke context begrijpelijk is.
 
 Belangrijk:
-- Gebruik de context alleen om het fragment begrijpelijk te maken.
+- Gebruik context alleen om verwijzingen op te lossen.
 - Verander de inhoud niet.
 - Voeg niets nieuws toe.
+- Verwijder partijnamen, fractienamen en persoonsnamen als die niet noodzakelijk zijn voor de betekenis.
+- Vervang zulke namen niet door "wij", "we", "de spreker" of "de fractie".
+- Formuleer het resultaat als een neutrale zelfstandige propositie.
+- Behoud negatie en strekking exact.
+- Als veilige normalisatie niet mogelijk is zonder te gokken, geef dan een lege string terug.
 - Geef precies één punt terug.
 
 Outputformaat:
-{{
+{
   "point": "korte zelfstandige propositie in het Nederlands"
-}}
+}
 
 Voorbeelden:
 {examples}
@@ -141,7 +206,7 @@ def extract_json_with_basic_repair(text: str) -> Dict[str, Any]:
 
     match = re.search(r"\{.*", text, flags=re.DOTALL)
     if not match:
-        raise ValueError(f"Geen JSON-object gevonden:\n{text}")
+        raise ValueError(f"Geen JSON-object gevonden:\\n{text}")
 
     candidate = match.group(0).strip()
 
@@ -155,4 +220,4 @@ def extract_json_with_basic_repair(text: str) -> Dict[str, Any]:
     try:
         return json.loads(candidate)
     except json.JSONDecodeError as e:
-        raise ValueError(f"JSON parsing mislukt:\n{candidate}\n\nError: {e}")
+        raise ValueError(f"JSON parsing mislukt:\\n{candidate}\\n\\nError: {e}")

@@ -13,6 +13,22 @@ from prompts.normalize_prompt import (
     validate_normalization_output,
 )
 
+def flatten_normalized_row(row_dict, parsed_output, args):
+    point = parsed_output.get("point", "").strip()
+
+    if not point:
+        return []
+
+    return [{
+        "document_id": row_dict.get(args.doc_id_col),
+        "intervention_id": row_dict.get(args.order_col),
+        "party": row_dict.get(args.party_col),
+        "speaker": row_dict.get(args.speaker_col),
+        "speaker_label": row_dict.get(args.speaker_label_col),
+        "claim_idx": row_dict.get("claim_idx"),
+        "quote": row_dict.get("quote", ""),
+        "point": point,
+    }]
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -108,6 +124,7 @@ def main():
     timestamp_str = f"_{timestamp}" if timestamp else ""
     base_name = args.claims_csv.split("/")[-1].replace(".csv", f"_normalized{timestamp_str}.csv")
     output_csv = os.path.join(args.output_dir, base_name)
+    output_points_csv = os.path.join(args.output_dir, base_name.replace("_normalized", "_normalized_points"))
 
     claims_df = pd.read_csv(args.claims_csv)
     debates_df = pd.read_csv(args.debates_csv)
@@ -121,6 +138,7 @@ def main():
     print("[DEBUG] Model load finished.", flush=True)
 
     processed_records = []
+    flattened_points = []
 
     start_idx = 0
     if args.resume and os.path.exists(output_csv):
@@ -197,13 +215,18 @@ def main():
 
         processed_records.append(row_dict)
 
+        temp_flat = flatten_normalized_row(row_dict, parsed_output, args)
+        flattened_points.extend(temp_flat)
+
         # Incremental saving at checkpoints (safe for crashes)
         if (i + 1 - start_idx) % args.checkpoint_every == 0:
             pd.DataFrame(processed_records).to_csv(output_csv, index=False)
             print(f"[DEBUG] Checkpoint saved at row {i+1}", flush=True)
+            pd.DataFrame(flattened_points).to_csv(output_points_csv, index=False)
 
     # Final save
     pd.DataFrame(processed_records).to_csv(output_csv, index=False)
+    pd.DataFrame(flattened_points).to_csv(output_points_csv, index=False)
     print("[DEBUG] Normalization finished successfully.", flush=True)
 
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=gpu_mig
+#SBATCH --partition=gpu_a100
 #SBATCH --gpus=1
 #SBATCH --job-name=normalize
 #SBATCH --ntasks=1
@@ -18,5 +18,5 @@ srun python normalize.py \
   --debates_csv data/debate_sample_terrorist.csv \
   --summaries_csv summaries/debate_sample_terrorist_summary_20260401_112744.csv \
   --output_dir outputs/ \
-  --model_name Qwen/Qwen2.5-7B-Instruct \
+  --model_name Qwen/Qwen2.5-32B-Instruct \
   --add_timestamp

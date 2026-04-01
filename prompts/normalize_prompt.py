@@ -52,9 +52,9 @@ Context:
 Het debat gaat over het verschil tussen terroristen in Nederland en personen in buitenlandse krijgsdienst.
 
 Output:
-{
+{{
   "point": "Er is geen intrinsiek verschil tussen terroristen in Nederland en personen in buitenlandse krijgsdienst."
-}
+}}
 
 Voorbeeld 2
 
@@ -68,9 +68,9 @@ Context:
 Het debat gaat over terroristen in Nederland en personen in buitenlandse krijgsdienst.
 
 Output:
-{
+{{
   "point": "De wet moet worden toegepast op terroristen in Nederland en personen in buitenlandse krijgsdienst."
-}
+}}
 
 
 Voorbeeld 3
@@ -85,9 +85,9 @@ Context:
 Het debat gaat over gelijke behandeling van terroristen en personen in buitenlandse krijgsdienst.
 
 Output:
-{
+{{
   "point": "Terroristen en soldaten van een vreemd leger moeten gelijk worden behandeld."
-}
+}}
 
 Voorbeeld 4
 
@@ -101,9 +101,9 @@ Context:
 Het debat gaat over een uitzonderingsclausule in verdragen voor terroristen.
 
 Output:
-{
+{{
   "point": "Een uitzonderingsclausule in verdragen voor terroristen is onwenselijk."
-}
+}}
 
 Voorbeeld 5
 
@@ -117,9 +117,9 @@ Context:
 Onvoldoende context om ondubbelzinnig te bepalen waar het fragment naar verwijst.
 
 Output:
-{
+{{
   "point": ""
-}
+}}
 """.strip()
 
 
@@ -138,9 +138,9 @@ Belangrijk:
 - Geef precies één punt terug.
 
 Outputformaat:
-{
+{{
   "point": "korte zelfstandige propositie in het Nederlands"
-}
+}}
 
 Voorbeelden:
 {examples}

@@ -38,11 +38,11 @@ Neem alleen fragmenten die:
 Negeer begroetingen, procedurele opmerkingen, grapjes en inhoudsloze herhaling.
 
 Output:
-{{
+{{{{
   "claims": [
     {{"quote": "exact tekstfragment uit de interventie"}}
   ]
-}}
+}}}}
 
 Als er geen argumentatieve fragmenten zijn:
 {{"claims": []}}
@@ -62,14 +62,14 @@ Interventie:
 "Wij vinden dat deze maatregel noodzakelijk is, omdat hij de veiligheid vergroot. Bovendien is er geen minder ingrijpend alternatief beschikbaar, dus het is gerechtvaardigd om deze stap te nemen."
 
 Output:
-{
+{{
   "claims": [
-    {"quote": "deze maatregel noodzakelijk is"},
-    {"quote": "omdat hij de veiligheid vergroot"},
-    {"quote": "er geen minder ingrijpend alternatief beschikbaar is"},
-    {"quote": "dus het is gerechtvaardigd om deze stap te nemen"}
+    {{"quote": "deze maatregel noodzakelijk is"}},
+    {{"quote": "omdat hij de veiligheid vergroot"}},
+    {{"quote": "er geen minder ingrijpend alternatief beschikbaar is"}},
+    {{"quote": "dus het is gerechtvaardigd om deze stap te nemen"}}
   ]
-}
+}}
 """.strip()
 
 

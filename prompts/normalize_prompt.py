@@ -42,7 +42,7 @@ Het debat gaat over het verschil tussen terroristen in Nederland en personen in 
 
 Output:
 {
-  "point": "Volgens de VVD is er geen intrinsiek verschil tussen terroristen in Nederland en personen in buitenlandse krijgsdienst."
+  "point": "Er is geen intrinsiek verschil tussen terroristen in Nederland en personen in buitenlandse krijgsdienst."
 }
 
 Voorbeeld 2
@@ -58,7 +58,7 @@ Het debat gaat over twee situaties die juridisch gelijk behandeld moeten worden.
 
 Output:
 {
-  "point": "De wet moet volgens de spreker in beide situaties worden toegepast."
+  "point": "De wet moet in beide situaties, terroristen in Nederland en personen in buitenlandse krijgsdienst, worden toegepast."
 }
 """.strip()
 

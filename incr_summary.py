@@ -100,7 +100,7 @@ def update_running_summary(
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input_csv", type=str, required=True)
+    parser.add_argument("--debates_csv", type=str, required=True, help="Input debates CSV file")
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--model_name", type=str, required=True)
 
@@ -140,13 +140,13 @@ def main():
     # Generate output CSV with optional timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
     timestamp_str = f"_{timestamp}" if timestamp else ""
-    base_name = args.input_csv.split("/")[-1].replace(".csv", f"_summary{timestamp_str}.csv")
+    base_name = args.debates_csv.split("/")[-1].replace(".csv", f"_summary{timestamp_str}.csv")
     output_csv = os.path.join(args.output_dir, base_name)
 
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
 
-    df = pd.read_csv(args.input_csv)
+    df = pd.read_csv(args.debates_csv)
     df = df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
 
     print("[DEBUG] Starting model load...", flush=True)

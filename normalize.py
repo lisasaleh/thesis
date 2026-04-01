@@ -19,6 +19,7 @@ def parse_args():
 
     parser.add_argument("--claims_csv", type=str, required=True)
     parser.add_argument("--debates_csv", type=str, required=True)
+    parser.add_argument("--summaries_csv", type=str, required=True, help="Summaries from incr_summary.py")
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--model_name", type=str, required=True)
 
@@ -33,6 +34,7 @@ def parse_args():
     parser.add_argument("--text_col", type=str, default="speech")
     parser.add_argument("--summary_col", type=str, default="summary_before")
 
+    parser.add_argument("--checkpoint_every", type=int, default=25)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
 
@@ -109,8 +111,10 @@ def main():
 
     claims_df = pd.read_csv(args.claims_csv)
     debates_df = pd.read_csv(args.debates_csv)
+    summaries_df = pd.read_csv(args.summaries_csv)
 
     debates_df = debates_df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
+    summaries_df = summaries_df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
 
     print("[DEBUG] Starting model load...", flush=True)
     llm = LocalLLM(args.model_name)
@@ -126,6 +130,7 @@ def main():
         print(f"[DEBUG] Resume enabled | start_idx={start_idx}", flush=True)
 
     debates_lookup = debates_df.set_index([args.doc_id_col, args.order_col])
+    summaries_lookup = summaries_df.set_index([args.doc_id_col, args.order_col])
 
     for i in tqdm(range(start_idx, len(claims_df)), total=len(claims_df) - start_idx):
         row = claims_df.iloc[i]
@@ -153,7 +158,7 @@ def main():
             continue
 
         intervention = str(debate_row[args.text_col]) if pd.notna(debate_row[args.text_col]) else ""
-        summary = str(debate_row[args.summary_col]) if pd.notna(debate_row[args.summary_col]) else ""
+        summary = str(summaries_lookup.loc[(doc_id, intervention_id)]["running_summary_after"]) if pd.notna(summaries_lookup.loc[(doc_id, intervention_id)]["running_summary_after"]) else ""
 
         previous_interventions = build_previous_interventions_text(
             debates_df=debates_df,
@@ -191,8 +196,13 @@ def main():
         row_dict["point"] = parsed_output.get("point", "")
 
         processed_records.append(row_dict)
-        pd.DataFrame(processed_records).to_csv(output_csv, index=False)
 
+        # Incremental saving at checkpoints (safe for crashes)
+        if (i + 1 - start_idx) % args.checkpoint_every == 0:
+            pd.DataFrame(processed_records).to_csv(output_csv, index=False)
+            print(f"[DEBUG] Checkpoint saved at row {i+1}", flush=True)
+
+    # Final save
     pd.DataFrame(processed_records).to_csv(output_csv, index=False)
     print("[DEBUG] Normalization finished successfully.", flush=True)
 

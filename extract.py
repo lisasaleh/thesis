@@ -96,7 +96,7 @@ def main():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
     timestamp_str = f"_{timestamp}" if timestamp else ""
-    base_name = args.target_party + args.input_csv.split("/")[-1].replace(".csv", f"{timestamp_str}.csv")
+    base_name = args.target_party + '_' + args.input_csv.split("/")[-1].replace(".csv", f"{timestamp_str}.csv")
     output_csv = base_name
     claims_name = base_name.replace(".csv", f"_claims.csv")
     output_csv_path = os.path.join(args.output_dir, output_csv)

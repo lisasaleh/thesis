@@ -57,9 +57,8 @@ def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def extract_claims(llm, intervention_text: str, summary: str = ""):
-    prompt = build_extract_prompt(
-        interruption_text=intervention_text,
-        debate_summary=summary,
+    prompt = build_claim_extraction_prompt(
+        text=intervention_text,
     )
 
     parsed = generate_json(llm, prompt, max_new_tokens=300)
@@ -131,13 +130,13 @@ def main():
 
     # Resume logic
     start_idx = 0
-    if args.resume and os.path.exists(args.output_csv):
-        done_df = pd.read_csv(args.output_csv)
+    if args.resume and os.path.exists(output_csv_path):
+        done_df = pd.read_csv(output_csv_path)
         start_idx = len(done_df)
         processed_records = done_df.to_dict("records")
 
-        if os.path.exists(args.output_claims_csv):
-            claims_df = pd.read_csv(args.output_claims_csv)
+        if os.path.exists(output_claims_csv):
+            claims_df = pd.read_csv(output_claims_csv)
             flattened_claims = claims_df.to_dict("records")
 
         print(f"[DEBUG] Resume enabled | start_idx={start_idx}", flush=True)
@@ -167,7 +166,6 @@ def main():
             processed_records.append(row_dict)
             continue
 
-        summary = str(row[args.summary_col]) if pd.notna(row[args.summary_col]) else ""
         text = str(row[args.text_col]) if pd.notna(row[args.text_col]) else ""
 
         # Skip empty text
@@ -208,12 +206,12 @@ def main():
         flattened_claims.extend(temp_flat)
 
         # Incremental saving (safe for crashes)
-        pd.DataFrame(processed_records).to_csv(args.output_csv, index=False)
-        pd.DataFrame(flattened_claims).to_csv(args.output_claims_csv, index=False)
+        pd.DataFrame(processed_records).to_csv(output_csv_path, index=False)
+        pd.DataFrame(flattened_claims).to_csv(output_claims_csv, index=False)
 
     # Final save
-    pd.DataFrame(processed_records).to_csv(args.output_csv, index=False)
-    pd.DataFrame(flattened_claims).to_csv(args.output_claims_csv, index=False)
+    pd.DataFrame(processed_records).to_csv(output_csv_path, index=False)
+    pd.DataFrame(flattened_claims).to_csv(output_claims_csv, index=False)
 
     print("[DEBUG] Extraction finished successfully.", flush=True)
 

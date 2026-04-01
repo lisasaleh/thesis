@@ -230,24 +230,12 @@ def main():
         records.append(record)
 
         if (i + 1) % args.checkpoint_every == 0:
-            if args.resume and os.path.exists(output_csv):
-                prev_df = pd.read_csv(output_csv)
-                out_df = pd.concat([prev_df, pd.DataFrame(records)], ignore_index=True)
-            else:
-                prefix_df = df.iloc[:start_idx].copy() if start_idx > 0 else pd.DataFrame()
-                out_df = pd.concat([prefix_df, pd.DataFrame(records)], ignore_index=True)
-
+            # Always save all accumulated records (not just the current batch)
+            out_df = pd.DataFrame(records)
             out_df.to_csv(output_csv, index=False)
-            records = []
 
     if records:
-        if args.resume and os.path.exists(output_csv):
-            prev_df = pd.read_csv(output_csv)
-            out_df = pd.concat([prev_df, pd.DataFrame(records)], ignore_index=True)
-        else:
-            prefix_df = df.iloc[:start_idx].copy() if start_idx > 0 else pd.DataFrame()
-            out_df = pd.concat([prefix_df, pd.DataFrame(records)], ignore_index=True)
-
+        out_df = pd.DataFrame(records)
         out_df.to_csv(output_csv, index=False)
 
     print(f"[DEBUG] Saved output to {output_csv}", flush=True)

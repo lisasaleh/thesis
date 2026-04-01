@@ -1,6 +1,7 @@
 import os
 import json
 import argparse
+from datetime import datetime
 import pandas as pd
 from tqdm import tqdm
 
@@ -18,7 +19,7 @@ def parse_args():
 
     parser.add_argument("--claims_csv", type=str, required=True)
     parser.add_argument("--debates_csv", type=str, required=True)
-    parser.add_argument("--output_csv", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--model_name", type=str, required=True)
 
     parser.add_argument("--quote_col", type=str, default="quote")
@@ -33,6 +34,7 @@ def parse_args():
     parser.add_argument("--summary_col", type=str, default="summary_before")
 
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
 
     return parser.parse_args()
 
@@ -45,8 +47,9 @@ def build_previous_interventions_text(
     order_col: str,
     speaker_col: str,
     party_col: str,
+    doc_id_col: str,
 ) -> str:
-    doc_df = debates_df[debates_df["document_id"] == doc_id].sort_values(order_col)
+    doc_df = debates_df[debates_df[doc_id_col] == doc_id].sort_values(order_col)
 
     prev_rows = doc_df[doc_df[order_col] < intervention_id].tail(2)
 
@@ -94,9 +97,15 @@ def normalize_single_quote(
 def main():
     args = parse_args()
 
-    output_dir = os.path.dirname(args.output_csv)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
+    # Ensure output directories exist
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+
+    # Generate output CSV with optional timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
+    timestamp_str = f"_{timestamp}" if timestamp else ""
+    base_name = args.claims_csv.split("/")[-1].replace(".csv", f"_normalized{timestamp_str}.csv")
+    output_csv = os.path.join(args.output_dir, base_name)
 
     claims_df = pd.read_csv(args.claims_csv)
     debates_df = pd.read_csv(args.debates_csv)
@@ -110,8 +119,8 @@ def main():
     processed_records = []
 
     start_idx = 0
-    if args.resume and os.path.exists(args.output_csv):
-        done_df = pd.read_csv(args.output_csv)
+    if args.resume and os.path.exists(output_csv):
+        done_df = pd.read_csv(output_csv)
         processed_records = done_df.to_dict("records")
         start_idx = len(done_df)
         print(f"[DEBUG] Resume enabled | start_idx={start_idx}", flush=True)
@@ -154,6 +163,7 @@ def main():
             order_col=args.order_col,
             speaker_col=args.speaker_col,
             party_col=args.party_col,
+            doc_id_col=args.doc_id_col,
         )
 
         print(
@@ -181,9 +191,9 @@ def main():
         row_dict["point"] = parsed_output.get("point", "")
 
         processed_records.append(row_dict)
-        pd.DataFrame(processed_records).to_csv(args.output_csv, index=False)
+        pd.DataFrame(processed_records).to_csv(output_csv, index=False)
 
-    pd.DataFrame(processed_records).to_csv(args.output_csv, index=False)
+    pd.DataFrame(processed_records).to_csv(output_csv, index=False)
     print("[DEBUG] Normalization finished successfully.", flush=True)
 
 

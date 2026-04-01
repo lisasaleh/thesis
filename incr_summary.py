@@ -141,11 +141,10 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
     timestamp_str = f"_{timestamp}" if timestamp else ""
     base_name = args.input_csv.split("/")[-1].replace(".csv", f"_summary{timestamp_str}.csv")
-    output_csv = os.path.join(os.path.dirname(args.output_dir), base_name)
+    output_csv = os.path.join(args.output_dir, base_name)
 
-    output_dir = os.path.dirname(output_csv)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
 
     df = pd.read_csv(args.input_csv)
     df = df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)

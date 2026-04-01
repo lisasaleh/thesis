@@ -1,0 +1,22 @@
+#!/bin/bash
+#SBATCH --partition=gpu_mig
+#SBATCH --gpus=1
+#SBATCH --job-name=normalize
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=9
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm_output/norm_%A.out
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+source activate thesis
+
+srun python norm.py \
+  --input_csv data/debate_sample_terrorist.csv \
+  --output_dir outputs/ \
+  --output_claims_csv outputs/ \
+  --model_name Qwen/Qwen2.5-7B-Instruct \
+  --target_party VVD \
+  --add_timestamp

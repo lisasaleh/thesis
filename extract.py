@@ -20,7 +20,6 @@ def parse_args():
     parser.add_argument("--model_name", type=str, required=True)
 
     parser.add_argument("--text_col", type=str, default="speech")
-    parser.add_argument("--summary_col", type=str, default="summary_before")
     parser.add_argument("--party_col", type=str, default="party")
     parser.add_argument("--doc_id_col", type=str, default="document_id")
     parser.add_argument("--order_col", type=str, default="intervention_id")
@@ -56,7 +55,7 @@ def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:
     return {"claims": cleaned_claims}
 
 
-def extract_claims(llm, intervention_text: str, summary: str = ""):
+def extract_claims(llm, intervention_text: str):
     prompt = build_claim_extraction_prompt(
         text=intervention_text,
     )
@@ -185,7 +184,6 @@ def main():
             result = extract_claims(
                 llm,
                 intervention_text=text,
-                summary=summary,
             )
             parsed_output = result["parsed_output"]
             model_output_json = result["model_output_json"]

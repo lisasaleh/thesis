@@ -77,7 +77,7 @@ def build_previous_interventions_text(
         party = str(row.get(party_col, "")).strip()
         text = str(row.get(text_col, "")).strip()
 
-        chunks.append(f"Spreker: {speaker} ({party})\n{text}")
+        chunks.append(f"{speaker} ({party}): {text}")
 
     return "\n\n---\n\n".join(chunks)
 
@@ -177,7 +177,11 @@ def main():
             processed_records.append(row_dict)
             continue
 
-        intervention = str(debate_row[args.text_col]) if pd.notna(debate_row[args.text_col]) else ""
+        # Format current intervention with speaker and party
+        speaker = str(debate_row.get(args.speaker_col, "")).strip()
+        party = str(debate_row.get(args.party_col, "")).strip()
+        intervention_text = str(debate_row[args.text_col]) if pd.notna(debate_row[args.text_col]) else ""
+        intervention = f"{speaker} ({party}): {intervention_text}"
         summary = str(summaries_lookup.loc[(doc_id, intervention_id)]["running_summary_after"]) if pd.notna(summaries_lookup.loc[(doc_id, intervention_id)]["running_summary_after"]) else ""
 
         previous_interventions = build_previous_interventions_text(

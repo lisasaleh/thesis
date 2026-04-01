@@ -22,7 +22,7 @@ Zeer belangrijke regels:
 - Verander de inhoudelijke betekenis niet.
 - Behoud negatie, modaliteit, strekking en polariteit exact.
 - Voeg geen nieuwe claims, interpretaties, evaluaties, causaliteit of details toe.
-- Verwijder partijnamen, fractienamen, persoonsnamen en bronvermeldingen als zij niet strikt noodzakelijk zijn voor de inhoud.
+- Herschrijf de passage zodat partijnamen, fractienamen, persoonsnamen en bronvermeldingen niet voorkomen, tenzij zij inhoudelijk onderdeel zijn van het standpunt zelf (niet slechts de bron).
 - Vervang partijnamen, fractienamen of persoonsnamen NIET door "wij", "we", "de spreker", "de fractie", "volgens de spreker" of vergelijkbare bronvermeldingen.
 - Formuleer het resultaat bij voorkeur als een neutrale, zelfstandige propositie.
 - Behoud een actor alleen als die actor inhoudelijk onderdeel is van het punt en niet slechts de bron van het standpunt is.
@@ -46,7 +46,7 @@ Quote:
 "Er is dus wat de VVD-fractie betreft geen intrinsiek verschil tussen die twee."
 
 Interventie:
-"De wet geldt ook voor terroristen die in Nederland actief zijn. Er is dus wat de VVD-fractie betreft geen intrinsiek verschil tussen die twee."
+De heer Dijkstra (VVD): De wet geldt ook voor terroristen die in Nederland actief zijn. Er is dus wat de VVD-fractie betreft geen intrinsiek verschil tussen die twee.
 
 Context:
 Het debat gaat over het verschil tussen terroristen in Nederland en personen in buitenlandse krijgsdienst.
@@ -62,7 +62,7 @@ Quote:
 "Daarom moet de wet in beide gevallen worden toegepast."
 
 Interventie:
-"We hebben het over terroristen in Nederland en personen in buitenlandse krijgsdienst. Er is geen principieel verschil tussen deze twee situaties. Daarom moet de wet in beide gevallen worden toegepast."
+De heer Verhoeven (D66): We hebben het over terroristen in Nederland en personen in buitenlandse krijgsdienst. Er is geen principieel verschil tussen deze twee situaties. Daarom moet de wet in beide gevallen worden toegepast.
 
 Context:
 Het debat gaat over terroristen in Nederland en personen in buitenlandse krijgsdienst.
@@ -79,7 +79,7 @@ Quote:
 "De VVD-fractie wil dat terroristen en soldaten van een vreemd leger gelijk worden behandeld."
 
 Interventie:
-"De VVD-fractie wil dat terroristen en soldaten van een vreemd leger gelijk worden behandeld."
+Mevrouw Özcan (DENK): De VVD-fractie wil dat terroristen en soldaten van een vreemd leger gelijk worden behandeld.
 
 Context:
 Het debat gaat over gelijke behandeling van terroristen en personen in buitenlandse krijgsdienst.
@@ -92,10 +92,10 @@ Output:
 Voorbeeld 4
 
 Quote:
-"Wij vinden dat onwenselijk."
+"Dit is onwenselijk."
 
 Interventie:
-"Wij vinden dat onwenselijk."
+De heer Paternotte (D66): Dit is onwenselijk.
 
 Context:
 Het debat gaat over een uitzonderingsclausule in verdragen voor terroristen.
@@ -111,7 +111,7 @@ Quote:
 "dat we nemen"
 
 Interventie:
-"dat we nemen"
+De heer Schmidt (CU): dat we nemen
 
 Context:
 Onvoldoende context om ondubbelzinnig te bepalen waar het fragment naar verwijst.
@@ -128,12 +128,15 @@ Herformuleer het onderstaande fragment tot één korte, zelfstandige propositie 
 
 Belangrijk:
 - Gebruik context alleen om verwijzingen op te lossen.
-- Verander de inhoud niet.
+- De interventies zijn geformatteerd als "Spreker (Partij): tekst".
+- Herschrijf de substantie van het fragment zodat het zelfstandig staat, zonder verwijzing naar spreker, partij of fractie.
+- Dit werkt alleen als de speaker hun eigen positie uitdrukt. Voorbeeld: Spreker (CU) zegt "De CU-fractie vindt dat XYZ onwenselijk is" → "XYZ is onwenselijk".
+- Let op: Ook als de quote een ander partij verwijst, herschrijf je de substantie zonder partijnaam. Voorbeeld: Spreker (DENK) citeert "De VVD wil dat..." → extraheer alleen de substantie "..." zonder verwijzing naar VVD.
+- Bewaak de modalisering: onderscheid tussen "XYZ moet gebeuren" (norm) en "XYZ gebeurt" (feit).
+- Verander de inhoudelijke betekenis niet.
 - Voeg niets nieuws toe.
-- Verwijder partijnamen, fractienamen en persoonsnamen als die niet noodzakelijk zijn voor de betekenis.
-- Vervang zulke namen niet door "wij", "we", "de spreker" of "de fractie".
-- Formuleer het resultaat als een neutrale zelfstandige propositie.
-- Behoud negatie en strekking exact.
+- Formuleer het resultaat als een neutrale, zelfstandige propositie.
+- Behoud negatie, modaliteit en strekking exact.
 - Als veilige normalisatie niet mogelijk is zonder te gokken, geef dan een lege string terug.
 - Geef precies één punt terug.
 
@@ -165,7 +168,6 @@ Te normaliseren quote:
 {quote}
 \"\"\"
 """.strip()
-
 
 def build_normalization_prompt(
     quote: str,

@@ -8,7 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from llm_utils import LocalLLM, generate_json
-from prompts.extract import build_extract_prompt
+from prompts.extract_prompt import build_extract_prompt
 
 
 def parse_args():

@@ -5,7 +5,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from llm_utils import LocalLLM
-from normalize_prompt import (
+from prompts.normalize_prompt import (
     NORMALIZATION_SYSTEM_PROMPT,
     build_normalization_prompt,
     extract_json_with_basic_repair,

@@ -6,95 +6,18 @@ from typing import Optional, Dict, Any
 import pandas as pd
 from tqdm import tqdm
 
-from llm_utils import LocalLLM, extract_json_with_repair
-
-
-def build_incremental_summary_prompt(
-    current_state_json: Optional[str],
-    speaker: str,
-    party: str,
-    idx: int,
-    new_intervention_text: str,
-    max_words: int = 150,
-) -> str:
-    return f"""
-Je helpt bij het incrementeel bijhouden van een compacte, gestructureerde samenvatting van een Nederlands parlementair debat.
-
-Doel:
-Werk de lopende debatrepresentatie bij op basis van de NIEUWE INTERVENTIE, zodat de output steeds een compacte samenvatting blijft van het GEHELE debat tot nu toe, niet alleen van de meest recente uitwisseling.
-
-BELANGRIJK:
-- Schrijf alle tekst volledig in het Nederlands.
-- Verzin geen informatie.
-- Behoud belangrijke eerdere context.
-- De output moet ALLE relevante eerdere discussiepunten blijven bevatten.
-- De samenvatting moet het HELE debat tot nu toe representeren.
-- Het is NIET toegestaan om alleen de laatste interventie samen te vatten.
-- Verwijder eerdere discussiepunten alleen als zij duidelijk niet langer relevant zijn.
-- Als de nieuwe interventie voortbouwt op een bestaand discussiepunt, werk dat punt dan bij.
-
-BELANGRIJK VOOR JSON:
-- Geef EXACT één JSON-object terug.
-- Gebruik standaard JSON-notatie.
-- Gebruik dubbele aanhalingstekens zoals gebruikelijk in JSON.
-- Gebruik GEEN trailing commas.
-- Gebruik GEEN extra tekst buiten JSON.
-
-Instructies:
-- Focus op inhoudelijke politieke inhoud.
-- Negeer begroetingen, procedurele opmerkingen, humor en retorische opvulling, tenzij inhoudelijk relevant.
-- Vat het debat samen als een kleine verzameling terugkerende discussiepunten.
-- Noteer per discussiepunt alleen de belangrijkste argumenten, bezwaren, voorstellen of reacties die tot nu toe zijn genoemd.
-- Gebruik maximaal 3 discussiepunten.
-- Gebruik maximaal 2 argumenten per discussiepunt.
-- Houd argumenten kort en kernachtig.
-- Bewaar alleen de belangrijkste terugkerende inhoudelijke punten.
-- Zorg dat "updated_summary" een compacte samenvatting is van het gehele debat tot nu toe.
-- Houd "updated_summary" onder de {max_words} woorden.
-
-JSON-schema:
-{{
-  "main_topic": "",
-  "points_of_discussion": [
-    {{
-      "point": "",
-      "arguments": [
-        ""
-      ]
-    }}
-  ],
-  "updated_summary": ""
-}}
-
-Voorbeeld van correcte uitvoer:
-{{
-  "main_topic": "Intrekking van het Nederlanderschap bij terroristische misdrijven",
-  "points_of_discussion": [
-    {{
-      "point": "Proportionaliteit van de maatregel",
-      "arguments": [
-        "De minister stelt dat proportionaliteit gewaarborgd is.",
-        "Critici vrezen dat de maatregel te ver gaat."
-      ]
-    }}
-  ],
-  "updated_summary": "Het debat gaat over de proportionaliteit en rechtsstatelijke legitimiteit van het intrekken van het Nederlanderschap bij terroristische misdrijven."
-}}
-
-HUIDIGE LOPENDE DEBATSTAAT:
-{current_state_json if current_state_json else "Nog geen samenvatting."}
-
-METADATA VAN DE NIEUWE INTERVENTIE:
-Spreker: {speaker}
-Partij: {party}
-Interventie-index: {idx}
-
-NIEUWE INTERVENTIE:
-{new_intervention_text}
-""".strip()
+from llm_utils import LocalLLM, generate_json
+from prompts.summary_prompt import build_incremental_summary_prompt
 
 
 def validate_state(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(parsed, dict):
+        return {
+            "main_topic": "",
+            "points_of_discussion": [],
+            "updated_summary": "",
+        }
+
     if "main_topic" not in parsed or not isinstance(parsed["main_topic"], str):
         parsed["main_topic"] = ""
 
@@ -115,16 +38,23 @@ def validate_state(parsed: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(arguments, list):
             arguments = []
 
-        arguments = [str(a) for a in arguments[:2]]
-        cleaned_points.append({
-            "point": point,
-            "arguments": arguments,
-        })
+        cleaned_arguments = []
+        for arg in arguments[:2]:
+            if isinstance(arg, str) and arg.strip():
+                cleaned_arguments.append(arg.strip())
+            elif arg is not None:
+                cleaned_arguments.append(str(arg).strip())
+
+        if point.strip():
+            cleaned_points.append({
+                "point": point.strip(),
+                "arguments": cleaned_arguments,
+            })
 
     parsed["points_of_discussion"] = cleaned_points[:3]
 
     if "updated_summary" not in parsed:
-        raise ValueError(f"Missing 'updated_summary' in output: {parsed}")
+        parsed["updated_summary"] = ""
 
     if not isinstance(parsed["updated_summary"], str):
         parsed["updated_summary"] = str(parsed["updated_summary"])
@@ -139,6 +69,7 @@ def update_running_summary(
     speaker: str,
     party: str,
     idx: int,
+    max_words: int = 250,
 ) -> Dict[str, Any]:
     current_state_json = (
         json.dumps(current_state, ensure_ascii=False, indent=2)
@@ -152,15 +83,16 @@ def update_running_summary(
         speaker=speaker,
         party=party,
         idx=idx,
+        max_words=max_words,
     )
 
-    raw_output = llm.generate(
+    parsed = generate_json(
+        llm=llm,
         prompt=prompt,
         max_new_tokens=700,
         temperature=0.0,
     )
 
-    parsed = extract_json_with_repair(raw_output, llm=llm)
     parsed = validate_state(parsed)
     return parsed
 
@@ -179,6 +111,8 @@ def parse_args():
 
     parser.add_argument("--checkpoint_every", type=int, default=25)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--max_words", type=int, default=250)
+
     return parser.parse_args()
 
 
@@ -187,12 +121,14 @@ def load_state_from_output_cell(cell_value: Any) -> Optional[Dict[str, Any]]:
         return None
     if not isinstance(cell_value, str) or not cell_value.strip():
         return None
+
     try:
         parsed = json.loads(cell_value)
         if isinstance(parsed, dict):
             return parsed
     except Exception:
         return None
+
     return None
 
 
@@ -206,7 +142,9 @@ def main():
     df = pd.read_csv(args.input_csv)
     df = df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
 
+    print("[DEBUG] Starting model load...", flush=True)
     llm = LocalLLM(args.model_name)
+    print("[DEBUG] Model load finished.", flush=True)
 
     if args.resume and os.path.exists(args.output_csv):
         done_df = pd.read_csv(args.output_csv)
@@ -226,7 +164,7 @@ def main():
 
     records = []
 
-    print(f"Starting from index {start_idx}")
+    print(f"[DEBUG] Starting from index {start_idx}", flush=True)
 
     for i in tqdm(range(start_idx, len(df)), total=len(df) - start_idx):
         row = df.iloc[i]
@@ -236,7 +174,6 @@ def main():
             current_doc_id = row_doc_id
             running_state = None
 
-        # Extract text safely
         text = str(row[args.text_col]) if pd.notna(row[args.text_col]) else ""
         word_count = len(text.split())
 
@@ -261,6 +198,7 @@ def main():
                     speaker=str(row[args.speaker_col]) if pd.notna(row[args.speaker_col]) else "Onbekend",
                     party=str(row[args.party_col]) if pd.notna(row[args.party_col]) else "Onbekend",
                     idx=int(row[args.order_col]),
+                    max_words=args.max_words,
                 )
 
                 running_state = result
@@ -272,7 +210,7 @@ def main():
                 raw_output = f"ERROR: {str(e)}"
                 running_summary_after = summary_before
                 skipped = False
-                # state remains unchanged
+                # running_state blijft ongewijzigd
 
         record = row.to_dict()
         record["summary_before"] = summary_before
@@ -305,7 +243,7 @@ def main():
 
         out_df.to_csv(args.output_csv, index=False)
 
-    print(f"Saved output to {args.output_csv}")
+    print(f"[DEBUG] Saved output to {args.output_csv}", flush=True)
 
 
 if __name__ == "__main__":

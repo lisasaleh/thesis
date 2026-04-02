@@ -243,9 +243,9 @@ Te normaliseren quote:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT (GELDIG JSON, NIETS ANDERS)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{
+{{
   "point": "één zelfstandige zin, of lege string als te vaag"
-}
+}}
 
 Voorbeelden:
 {examples}
@@ -287,12 +287,19 @@ def validate_normalization_output(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def extract_json_with_basic_repair(text: str) -> Dict[str, Any]:
     text = strip_fences(text)
-
-    match = re.search(r"\{.*", text, flags=re.DOTALL)
+    
+    # Try to find JSON object with opening brace
+    match = re.search(r"\{[^{}]*\}", text, flags=re.DOTALL)
     if not match:
-        raise ValueError(f"Geen JSON-object gevonden:\\n{text}")
-
-    candidate = match.group(0).strip()
+        # Try more permissive: find first { and last }
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            candidate = text[start:end+1]
+        else:
+            raise ValueError(f"Geen JSON-object gevonden:\n{text}")
+    else:
+        candidate = match.group(0)
 
     try:
         return json.loads(candidate)
@@ -308,10 +315,21 @@ def extract_json_with_basic_repair(text: str) -> Dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # Remove trailing commas before closing braces
+    # Remove trailing commas before closing braces/brackets
     candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
 
     try:
         return json.loads(candidate)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"JSON parsing mislukt:\\n{candidate}\\n\\nError: {e}")
+    except json.JSONDecodeError:
+        pass
+    
+    # Last attempt: try to extract just the point value if JSON is severely malformed
+    point_match = re.search(r'"point"\s*:\s*"([^"]*)"', candidate)
+    if point_match:
+        return {"point": point_match.group(1)}
+    
+    point_match = re.search(r'"point"\s*:\s*""', candidate)
+    if point_match:
+        return {"point": ""}
+
+    raise ValueError(f"JSON parsing mislukt:\n{candidate}")

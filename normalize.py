@@ -212,6 +212,7 @@ def main():
             raw_output = result["raw_model_output"]
         except Exception as e:
             print(f"[ERROR] Failed on row {i}: {e}", flush=True)
+            print(f"[DEBUG_RAW] Raw output was:\n{raw_output[:500]}\n", flush=True)
             parsed_output = {"point": ""}
             raw_output = f"ERROR: {str(e)}"
 

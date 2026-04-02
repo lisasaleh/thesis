@@ -3,6 +3,8 @@ import os
 import re
 import sys
 from typing import Dict, Any
+import traceback
+
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -41,12 +43,17 @@ class LocalLLM:
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA not available")
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map="auto",
-            dtype="auto",
-            **token_args
-        )
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map="auto",
+                dtype="auto",
+                **token_args
+            )
+        except Exception as e:
+            print(f"[ERROR] from_pretrained failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+            traceback.print_exc()
+            raise
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token

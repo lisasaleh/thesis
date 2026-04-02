@@ -47,7 +47,7 @@ class LocalLLM:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 device_map="auto",
-                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
                 **token_args
             )
         except Exception as e:

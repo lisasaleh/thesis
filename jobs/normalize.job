@@ -11,11 +11,14 @@ module purge
 module load 2025
 module load Anaconda3/2025.06-1
 
-source activate thesis
+export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
+export CONDA_PKGS_DIRS=/scratch-shared/lsaleh/.conda/pkgs
 
 export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
 export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
+
+source activate thesis
 
 srun python normalize.py \
   --claims_csv outputs/VVDdebate_sample_terrorist_20260401_112625_claims.csv \

@@ -1,8 +1,11 @@
+import json
 import os
+import re
 import sys
+from typing import Dict, Any
+
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
 
 class LocalLLM:
     def __init__(self, model_name: str):
@@ -102,8 +105,7 @@ class LocalLLM:
 
         print("[DEBUG] Generation finished", file=sys.stderr, flush=True)
         return text.strip()
-    
-    
+
     def generate(
         self,
         prompt: str,

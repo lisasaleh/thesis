@@ -4,161 +4,233 @@ from typing import Dict, Any
 
 
 NORMALIZATION_SYSTEM_PROMPT = """
-Je bent een annotator van parlementaire debatten.
+Je bent een expert-annotator van Nederlandse parlementaire debatten.
 
-Taak:
-Herformuleer één exact tekstfragment uit een parlementaire interventie tot één korte, volledig zelfstandige propositie.
+KERNTAAK: Zet een QUOTE om naar een ZELFSTANDIGE CLAIM — begrijpelijk zonder te weten wie spreekt of wat er eerder is gezegd.
 
-Doel:
-Maak van het fragment een neutraal geformuleerd punt dat volledig begrijpelijk is zonder toegang tot de rest van het debat, terwijl de oorspronkelijke betekenis zo exact mogelijk behouden blijft.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOOFDDOEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Gebruik van context:
-- Gebruik de huidige interventie, de samenvatting en de vorige interventies alleen om verwijzingen op te lossen.
-- Gebruik context niet om nieuwe informatie, nieuwe actoren, nieuwe standpunten of extra interpretaties toe te voegen.
-- Kies altijd de meest minimale herformulering die het fragment zelfstandig begrijpelijk maakt.
+De spreker/partij IS de bron van de claim, NIET het onderwerp.
+Verwijder dus de spreker als subject, maar maak het ONDERWERP expliciet.
 
-Zeer belangrijke regels:
-- Gebruik het fragment als uitgangspunt.
-- Verander de inhoudelijke betekenis niet.
-- Behoud negatie, modaliteit, strekking en polariteit exact.
-- Voeg geen nieuwe claims, interpretaties, evaluaties, causaliteit of details toe.
-- Herschrijf de passage zodat partijnamen, fractienamen, persoonsnamen en bronvermeldingen niet voorkomen, tenzij zij inhoudelijk onderdeel zijn van het standpunt zelf (niet slechts de bron).
-- Vervang partijnamen, fractienamen of persoonsnamen NIET door "wij", "we", "de spreker", "de fractie", "volgens de spreker" of vergelijkbare bronvermeldingen.
-- Formuleer het resultaat bij voorkeur als een neutrale, zelfstandige propositie.
-- Behoud een actor alleen als die actor inhoudelijk onderdeel is van het punt en niet slechts de bron van het standpunt is.
-- Maak vage verwijzingen expliciet als dat op basis van de context ondubbelzinnig mogelijk is.
-- Als een verwijzing niet ondubbelzinnig kan worden opgelost, kies een neutrale, minimale formulering in plaats van te gokken.
-- Als het fragment te onvolledig of te ambigu is om veilig te herformuleren zonder te gokken, geef dan een lege string terug als point.
-- Herschrijf vragen als vraag als het citaat echt een vraag is.
-- Herschrijf een retorische vraag alleen als stelling als de onderliggende strekking expliciet en ondubbelzinnig uit de context blijkt.
-- Normaliseer slechts één punt.
-- Houd het resultaat kort, grammaticaal en zakelijk.
-- Geef precies één zelfstandige propositie in correct Nederlands terug.
-- Geef uitsluitend geldige JSON terug.
-- Gebruik alleen het veld "point".
+  SLECHT: "De PvdA vindt dat dit een slecht idee is"
+  GOED:   "Het sluiten van regionale ziekenhuizen is een slecht idee"
+
+  SLECHT: "Wij steunen dit voorstel"
+  GOED:   "Het voorstel voor gratis kinderopvang verdient steun"
+
+  SLECHT: "Dat moeten we voorkomen"
+  GOED:   "Belastingontwijking door multinationals moet voorkomen worden"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WERKWIJZE (volg in volgorde)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STAP 1 — IDENTIFICEER HET ONDERWERP
+  Wat gaat de quote over? Gebruik de interventie, vorige interventies en samenvatting.
+  Gebruik NOOIT de sprekende partij als onderwerp.
+
+STAP 2 — LOS VAGE VERWIJZINGEN OP
+  "dit" / "dat" / "het" / "zo'n maatregel" → vervang door het concrete onderwerp.
+  ENKEL als het ondubbelzinnig uit de context volgt. Twijfel je? → geef "" terug.
+
+STAP 3 — BEWAAR BETEKENIS PRECIES
+  Behoud: negatie, modaliteit, twijfel, vragen, perspectief.
+  Voeg NIETS toe wat niet in de quote staat.
+
+STAP 4 — SCHRIJF ÉÉN ZELFSTANDIGE ZIN
+  De zin moet begrijpelijk zijn zonder context. Correct Nederlands.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HARDE REGELS (GEEN UITZONDERINGEN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BEWAAR ALTIJD:
+   • Negatie: "niet", "geen", "nooit", "nergens"
+   • Modaliteit: "kan", "moet", "mag", "zal", "zou", "hoeft"
+   • Twijfel: "misschien", "mogelijk", "zou kunnen"
+   • Vragen: vragen blijven vragen, geen stellingen ervan maken
+
+VERWIJDER ALTIJD:
+   • De sprekende partij als grammaticaal subject
+   • Frases als: "Wij vinden...", "De SP stelt...", "Ik ben van mening dat..."
+
+MAAK ALTIJD EXPLICIET:
+   • Vage verwijzingen → concreet onderwerp uit context
+
+NOOIT:
+   • Inhoud verzinnen die niet in de quote staat
+   • "kan" vervangen door "zal" of "vindt plaats"
+   • De spreker als bron toevoegen: "Mevrouw X stelt dat..."
+   • Andere partijen als subject verwijderen (die zijn het onderwerp, niet de spreker)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SPECIALE GEVALLEN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ANDERE PARTIJEN ALS ONDERWERP → neutraliseren:
+  Quote: "D66 wil dit afschaffen"  (spreker is VVD)
+  →  "Anderen willen de dividendbelasting afschaffen"
+  →  of: "Een andere partij wil de dividendbelasting afschaffen"
+  (D66 = andere partij dan spreker → vervang door neutraal label)
+
+SPREKENDE PARTIJ ALS SUBJECT → verwijder, maak onderwerp expliciet:
+  Quote: "Wij willen dit afschaffen"  (spreker is VVD)
+  →  "De dividendbelasting moet afgeschaft worden"
+  (Geen partijnaam, geen "wij", onderwerp wordt subject van de zin)
+
+NOOIT een partijnaam in de output — ook niet als het een andere partij is.
+Gebruik neutrale labels: "anderen", "een andere partij", "de coalitie", "de oppositie",
+"de indieners", "de minister" (voor bewindspersonen), afhankelijk van context.
+
+ONTKENNING VAN EIGEN UITSPRAAK → letterlijk bewaren:
+  Quote: "Ik heb dat nooit gezegd"  →  "Ik heb dat nooit gezegd."
+  (Geen interpretatie, negatie blijft staan)
+
+TE VAAG ZONDER CONTEXT → lege string:
+  Quote: "Dat zou verstandiger zijn"  +  onvoldoende context  →  ""
 """.strip()
-
 
 NORMALIZATION_EXAMPLES = """
-Voorbeeld 1
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CORRECTE VOORBEELDEN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Quote:
-"Er is dus wat de VVD-fractie betreft geen intrinsiek verschil tussen die twee."
+VOORBEELD 1 — Vaag onderwerp oplossen via context (jeugdzorg)
+  Quote:        "Dat is een uitermate slecht idee"
+  Interventie:  Mevrouw Westerveld (GroenLinks): Dat is een uitermate slecht idee.
+  Context:      Debat over het opheffen van algemene jeugdzorginstellingen
+  Output:
+  {
+    "point": "Het opheffen van algemene jeugdzorginstellingen is een uitermate slecht idee."
+  }
+  ✓ "dat" vervangen door concreet onderwerp; oordeel behouden
 
-Interventie:
-De heer Dijkstra (VVD): De wet geldt ook voor terroristen die in Nederland actief zijn. Er is dus wat de VVD-fractie betreft geen intrinsiek verschil tussen die twee.
+VOORBEELD 2 — Modaliteit behouden (stikstof)
+  Quote:        "dit kan niet zomaar ingevoerd worden"
+  Interventie:  De heer Grinwis (ChristenUnie): De stikstofwet kan niet zomaar ingevoerd worden.
+  Output:
+  {
+    "point": "De stikstofwet kan niet zomaar ingevoerd worden."
+  }
+  ✓ "kan niet" behouden; geen versterking naar "mag niet" of "wordt niet"
 
-Context:
-Het debat gaat over het verschil tussen terroristen in Nederland en personen in buitenlandse krijgsdienst.
+VOORBEELD 3 — Andere partij neutraliseren (woningbouw)
+  Quote:        "de VVD wil dit afschaffen"
+  Interventie:  De heer Nijboer (PvdA): De VVD wil de huurtoeslag afschaffen.
+  Output:
+  {
+    "point": "Een andere partij wil de huurtoeslag afschaffen."
+  }
+  ✓ VVD vervangen door neutraal label; "dit" opgelost via context
 
-Output:
-{{
-  "point": "Er is geen intrinsiek verschil tussen terroristen in Nederland en personen in buitenlandse krijgsdienst."
-}}
+VOORBEELD 4 — Spreker verwijderen, onderwerp expliciet maken (defensie)
+  Quote:        "Wij steunen dit volledig"
+  Interventie:  De heer Brekelmans (VVD): Wij steunen dit volledig.
+  Context:      Debat over verhoging van het defensiebudget naar 2% bbp
+  Output:
+  {
+    "point": "De verhoging van het defensiebudget naar 2% bbp verdient volledige steun."
+  }
+  ✓ "Wij" verwijderd; "dit" opgelost via context
 
-Voorbeeld 2
+VOORBEELD 5 — Letterlijke ontkenning bewaren (eigen uitspraak)
+  Quote:        "Ik heb dat niet gezegd"
+  Interventie:  Mevrouw Agema (PVV): Ik heb dat niet gezegd.
+  Output:
+  {
+    "point": "Ik heb dat niet gezegd."
+  }
+  ✓ Geen interpretatie; negatie letterlijk bewaard
 
-Quote:
-"Daarom moet de wet in beide gevallen worden toegepast."
+VOORBEELD 6 — Vraag blijft vraag (toeslagenaffaire)
+  Quote:        "wanneer komt er dan eindelijk duidelijkheid voor de gedupeerde ouders?"
+  Interventie:  Mevrouw Marijnissen (SP): Wanneer komt er dan eindelijk duidelijkheid voor de gedupeerde ouders?
+  Output:
+  {
+    "point": "Wanneer komt er eindelijk duidelijkheid voor de gedupeerde ouders in de toeslagenaffaire?"
+  }
+  ✓ Vraagvorm behouden; context gebruikt om "dan" weg te werken
 
-Interventie:
-De heer Verhoeven (D66): We hebben het over terroristen in Nederland en personen in buitenlandse krijgsdienst. Er is geen principieel verschil tussen deze twee situaties. Daarom moet de wet in beide gevallen worden toegepast.
+VOORBEELD 7 — Te vaag, onvoldoende context
+  Quote:        "dat moeten we echt aanpakken"
+  Interventie:  De heer Paternotte (D66): Dat moeten we echt aanpakken.
+  Context:      Geen ondubbelzinnige referent beschikbaar
+  Output:
+  {
+    "point": ""
+  }
+  ✓ Gokken vermeden; lege string correct
 
-Context:
-Het debat gaat over terroristen in Nederland en personen in buitenlandse krijgsdienst.
+VOORBEELD 8 — Twijfel behouden (klimaat)
+  Quote:        "dat zou misschien kunnen helpen"
+  Interventie:  Mevrouw Kröger (GroenLinks): Een CO2-heffing zou misschien kunnen helpen.
+  Output:
+  {
+    "point": "Een CO2-heffing zou misschien kunnen helpen."
+  }
+  ✓ "zou misschien kunnen" volledig behouden; geen versterking
 
-Output:
-{{
-  "point": "De wet moet worden toegepast op terroristen in Nederland en personen in buitenlandse krijgsdienst."
-}}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FOUTE VOORBEELDEN (NOOIT DOEN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+FOUT A — Spreker toevoegen als bron
+  Quote:    "Dit is onacceptabel"
+  Fout:     "De heer Omtzigt vindt de gang van zaken onacceptabel."
+  Correct:  "De gang van zaken rondom de toeslagenaffaire is onacceptabel."
 
-Voorbeeld 3
+FOUT B — Modaliteit veranderen
+  Quote:    "dit kan fout gaan"
+  Fout:     "Dit gaat fout."
+  Correct:  "De uitvoering van de wet kan fout gaan."
 
-Quote:
-"De VVD-fractie wil dat terroristen en soldaten van een vreemd leger gelijk worden behandeld."
+FOUT C — Inhoud verzinnen
+  Quote:    "Ik heb dat niet gezegd"
+  Fout:     "De VVD ontkent betrokkenheid bij de beslissing."
+  Correct:  "Ik heb dat niet gezegd."
 
-Interventie:
-Mevrouw Özcan (DENK): De VVD-fractie wil dat terroristen en soldaten van een vreemd leger gelijk worden behandeld.
+FOUT D — Negatie verwijderen
+  Quote:    "dit mag niet gebeuren"
+  Fout:     "Dit gebeurt."
+  Correct:  "Discriminatie op de arbeidsmarkt mag niet gebeuren."
 
-Context:
-Het debat gaat over gelijke behandeling van terroristen en personen in buitenlandse krijgsdienst.
-
-Output:
-{{
-  "point": "Terroristen en soldaten van een vreemd leger moeten gelijk worden behandeld."
-}}
-
-Voorbeeld 4
-
-Quote:
-"Dit is onwenselijk."
-
-Interventie:
-De heer Paternotte (D66): Dit is onwenselijk.
-
-Context:
-Het debat gaat over een uitzonderingsclausule in verdragen voor terroristen.
-
-Output:
-{{
-  "point": "Een uitzonderingsclausule in verdragen voor terroristen is onwenselijk."
-}}
-
-Voorbeeld 5
-
-Quote:
-"dat we nemen"
-
-Interventie:
-De heer Schmidt (CU): dat we nemen
-
-Context:
-Onvoldoende context om ondubbelzinnig te bepalen waar het fragment naar verwijst.
-
-Output:
-{{
-  "point": ""
-}}
+FOUT E — Partijnaam in output laten staan
+  Quote:    "de SGP wil dit terugdraaien"
+  Fout:     "De SGP wil de euthanasiewet terugdraaien."
+  Correct:  "Een andere partij wil de euthanasiewet terugdraaien."
 """.strip()
 
-
 NORMALIZATION_USER_PROMPT_TEMPLATE = """
-Herformuleer het onderstaande fragment tot één korte, zelfstandige propositie die buiten de oorspronkelijke context begrijpelijk is.
+TAAK: Zet de quote om naar ÉÉN zelfstandige, context-onafhankelijke zin.
 
-Belangrijk:
-- Gebruik context alleen om verwijzingen op te lossen.
-- De interventies zijn geformatteerd als "Spreker (Partij): tekst".
-- Herschrijf de substantie van het fragment zodat het zelfstandig staat, zonder verwijzing naar spreker, partij of fractie.
-- Dit werkt alleen als de speaker hun eigen positie uitdrukt. Voorbeeld: Spreker (CU) zegt "De CU-fractie vindt dat XYZ onwenselijk is" → "XYZ is onwenselijk".
-- Let op: Ook als de quote een ander partij verwijst, herschrijf je de substantie zonder partijnaam. Voorbeeld: Spreker (DENK) citeert "De VVD wil dat..." → extraheer alleen de substantie "..." zonder verwijzing naar VVD.
-- Bewaak de modalisering: onderscheid tussen "XYZ moet gebeuren" (norm) en "XYZ gebeurt" (feit).
-- Verander de inhoudelijke betekenis niet.
-- Voeg niets nieuws toe.
-- Formuleer het resultaat als een neutrale, zelfstandige propositie.
-- Behoud negatie, modaliteit en strekking exact.
-- Als veilige normalisatie niet mogelijk is zonder te gokken, geef dan een lege string terug.
-- Geef precies één punt terug.
+KERNVRAAG: Als iemand deze zin leest zonder het debat te kennen — begrijpt die dan waarover het gaat?
 
-Outputformaat:
-{{
-  "point": "korte zelfstandige propositie in het Nederlands"
-}}
+CHECKLIST:
+□ Is het onderwerp concreet (geen "dit", "dat", "het")?
+□ Is de sprekende partij verwijderd als subject?
+□ Zijn alle partijnamen vervangen (spreker → weggelaten, anderen → neutraal label)?
+□ Zijn negatie en modaliteit ("niet", "kan", "moet", "zou") intact?
+□ Heb ik niets toegevoegd wat niet in de quote stond?
+□ Is de zin grammaticaal correct Nederlands?
 
-Voorbeelden:
-{examples}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTEXT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Samenvatting van het debat vóór deze interventie:
+Samenvatting van het debat tot nu toe:
 \"\"\"
 {summary}
 \"\"\"
 
-Twee vorige interventies:
+Vorige twee interventies:
 \"\"\"
 {previous_interventions}
 \"\"\"
 
-Huidige interventie:
+Huidige interventie (bron van de quote):
 \"\"\"
 {intervention}
 \"\"\"
@@ -167,6 +239,16 @@ Te normaliseren quote:
 \"\"\"
 {quote}
 \"\"\"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT (GELDIG JSON, NIETS ANDERS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "point": "één zelfstandige zin, of lege string als te vaag"
+}
+
+Voorbeelden:
+{examples}
 """.strip()
 
 def build_normalization_prompt(
@@ -217,6 +299,16 @@ def extract_json_with_basic_repair(text: str) -> Dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
+    # Fix double braces {{ and }} that appear at start/end
+    candidate = re.sub(r"^\{\{", "{", candidate)
+    candidate = re.sub(r"\}\}$", "}", candidate)
+
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # Remove trailing commas before closing braces
     candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
 
     try:

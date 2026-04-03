@@ -16,7 +16,7 @@ export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
 
 srun /scratch-shared/lsaleh/.conda/envs/thesis/bin/python normalize.py \
-  --claims_csv outputs/VVDdebate_sample_terrorist_20260401_112625_claims.csv \
+  --claims_csv outputs/VVD_debate_sample_terrorist_20260403_122703_claims.csv \
   --debates_csv data/debate_sample_terrorist.csv \
   --summaries_csv summaries/debate_sample_terrorist_summary_20260401_112744.csv \
   --output_dir outputs/ \

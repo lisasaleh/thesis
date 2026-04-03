@@ -1,0 +1,19 @@
+#!/bin/bash
+#SBATCH --partition=gpu_mig
+#SBATCH --gpus=1
+#SBATCH --job-name=cluster
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=9
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm_output/cluster_%A.out
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+source activate thesis
+
+srun python run_clustering.py \
+  --input_csv outputs/VVD_debate_sample_terrorist_20260403_122703_claims_normalized_20260403_124817.csv \
+  --output_dir outputs/ \
+  --add_timestamp

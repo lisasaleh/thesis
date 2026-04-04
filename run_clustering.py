@@ -3,7 +3,7 @@ import argparse
 from datetime import datetime
 import pandas as pd
 
-from embedding import Embedder
+from embeddings import Embedder
 from clustering import reduce_embeddings, cluster_hdbscan
 from representatives import get_cluster_representatives
 

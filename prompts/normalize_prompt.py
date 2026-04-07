@@ -246,7 +246,6 @@ OUTPUT (GELDIG JSON, NIETS ANDERS)
 {{
   "point": "één zelfstandige zin, of lege string als te vaag"
 }}
-
 Voorbeelden:
 {examples}
 """.strip()

@@ -25,3 +25,7 @@ slurm_output/
 
 # big files
 rutte_ii.csv
+
+# jupyter notebooks
+.ipynb_checkpoints/
+*.ipynb

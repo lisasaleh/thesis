@@ -4,7 +4,7 @@ CLAIM_EXTRACTION_SYSTEM_PROMPT = """
 Je bent een annotator van parlementaire tekst.
 
 Taak:
-Extraheer alle afzonderlijke argumentatieve tekstfragmenten uit de huidige interventie.
+Extraheer alle afzonderlijke substantieve argumentatieve tekstfragmenten uit de huidige interventie.
 
 Regels:
 - Extraheer alleen tekstfragmenten uit de interventie die je krijgt.
@@ -17,7 +17,8 @@ Regels:
 - Kies telkens het kleinste tekstfragment dat nog zelfstandig argumentatieve betekenis draagt.
 - Splits lange zinnen op wanneer zij meerdere afzonderlijke argumentatieve eenheden bevatten.
 - Geef de voorkeur aan inhoudelijke claims, redenen, conclusies, beleidsbeoordelingen en causale uitspraken.
-- Neem expliciete conclusies met signaalwoorden zoals "dus", "daarmee", "bovendien", "dat betekent", "er is geen verschil" afzonderlijk op wanneer zij zelfstandige argumentatieve waarde hebben.
+- Neem expliciete conclusies met signaalwoorden zoals "dus", "daarmee", "bovendien", "dat betekent" afzonderlijk op wanneer zij zelfstandige argumentatieve waarde hebben.
+- SLUIT UIT: speech acts, ontkenningen, correcties en meta-commentaar (bijv. "dat heb ik niet gezegd", "dat wilde ik niet zeggen", "ik zei dat niet", referenties naar "wat je zojuist zei" of "wat de regering doet").
 - Negeer begroetingen, procedurele opmerkingen, grapjes en inhoudsloze herhaling.
 - Geef uitsluitend geldige JSON terug.
 - Gebruik alleen het veld "quote".
@@ -25,17 +26,27 @@ Regels:
 
 
 CLAIM_EXTRACTION_USER_PROMPT_TEMPLATE = """
-Extraheer de afzonderlijke argumentatieve tekstfragmenten uit deze interventie.
+Extraheer de afzonderlijke substantieve argumentatieve tekstfragmenten uit deze interventie.
 
 Neem alleen fragmenten die:
-- een standpunt uitdrukken,
-- een reden geven,
-- beleid beoordelen,
-- een gevolg benoemen,
-- een vergelijking met argumentatieve functie maken,
-- of een positie aanvallen of verdedigen.
+- een standpunt over beleid of maatregelen uitdrukken,
+- een concrete reden geven voor waarom iets goed/slecht is,
+- beleid beoordelen of evalueren,
+- een causaal verband beschrijven,
+- een gevolg of implicatie benoemen,
+- een vergelijking met argumentatieve functie maken.
 
-Negeer begroetingen, procedurele opmerkingen, grapjes en inhoudsloze herhaling.
+SLUIT UIT:
+- Speech acts zonder inhoud: "ik heb niet gezegd", "dat wilde ik niet zeggen", "dat zei ik niet"
+- Louter formele ontkenningen zonder onderbouwing
+- Verwijzingen naar wat anderen zeiden zonder eigen argument
+- Meta-opmerkingen over de discussie zelf
+- Procedurele opmerkingen
+- Lege herhaling
+
+Inclusief (als onderdeel van een argument):
+- Ontkenningen met reden: "Dit is niet waar, omdat..." of "X is onjuist omdat Y"
+- Correcties die een substantief argument maken
 
 Output:
 {{{{

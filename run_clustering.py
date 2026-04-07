@@ -37,10 +37,15 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--model_name", type=str, default="sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
     parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
+    parser.add_argument("--min_cluster_size", type=int, default=3, help="Minimum cluster size for HDBSCAN")
+    parser.add_argument("--min_samples", type=int, default=1, help="Minimum samples for HDBSCAN")
+    parser.add_argument("--n_neighbors", type=int, default=8, help="Number of neighbors for UMAP")
+    parser.add_argument("--min_dist", type=float, default=0.0, help="Minimum distance for UMAP")
     return parser.parse_args()
 
 
-def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2", add_timestamp=False):
+def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2", add_timestamp=False, 
+         min_cluster_size=3, min_samples=1, n_neighbors=8, min_dist=0.0):
     os.makedirs(output_dir, exist_ok=True)
     
     # Generate output filenames with optional timestamp
@@ -60,8 +65,8 @@ def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-mul
     embedder = Embedder(model_name=model_name)
     embeddings = embedder.encode(df_unique["point_clean"].tolist())
 
-    reduced = reduce_embeddings(embeddings)
-    labels, probs, _ = cluster_hdbscan(reduced)
+    reduced = reduce_embeddings(embeddings, n_neighbors=n_neighbors, min_dist=min_dist)
+    labels, probs, _ = cluster_hdbscan(reduced, min_cluster_size=min_cluster_size, min_samples=min_samples)
 
     df_unique["cluster_id"] = labels
     df_unique["cluster_confidence"] = probs
@@ -94,4 +99,5 @@ def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-mul
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.input_csv, args.output_dir, args.model_name, args.add_timestamp)
+    main(args.input_csv, args.output_dir, args.model_name, args.add_timestamp,
+         args.min_cluster_size, args.min_samples, args.n_neighbors, args.min_dist)

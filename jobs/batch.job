@@ -17,4 +17,7 @@ python batch_all.py \
   --input_csv data/debate_sample_terrorist.csv \
   --party VVD \
   --model_7b Qwen/Qwen2.5-7B-Instruct \
-  --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct
+  --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
+  --skip_normalize \
+  --skip_cluster \
+  --skip_selection

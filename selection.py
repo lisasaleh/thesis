@@ -225,7 +225,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Generate output filename based on party
-    output_csv = os.path.join(args.output_dir, f"selected_{args.party}.csv")
+    output_csv = os.path.join(args.output_dir, f"{args.party}_selection.csv")
 
     df = pd.read_csv(args.input_csv)
 

@@ -37,6 +37,7 @@ def parse_args():
     parser.add_argument("--debates_csv", type=str, required=True)
     parser.add_argument("--summaries_csv", type=str, required=True, help="Summaries from incr_summary.py")
     parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--party", type=str, required=True, help="Party name for output filename")
     parser.add_argument("--model_name", type=str, required=True)
 
     parser.add_argument("--quote_col", type=str, default="quote")
@@ -124,9 +125,8 @@ def main():
     # Generate output CSV with optional timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
     timestamp_str = f"_{timestamp}" if timestamp else ""
-    base_name = args.claims_csv.split("/")[-1].replace(".csv", f"_normalized{timestamp_str}.csv")
-    output_csv = os.path.join(args.output_dir, base_name)
-    output_points_csv = os.path.join(args.output_dir, base_name.replace("_normalized", "_normalized_points"))
+    output_csv = os.path.join(args.output_dir, f"{args.party}_normalized_records{timestamp_str}.csv")
+    output_points_csv = os.path.join(args.output_dir, f"{args.party}_normalized{timestamp_str}.csv")
 
     claims_df = pd.read_csv(args.claims_csv)
     debates_df = pd.read_csv(args.debates_csv)

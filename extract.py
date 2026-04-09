@@ -16,7 +16,7 @@ def parse_args():
 
     parser.add_argument("--input_csv", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
-    parser.add_argument("--output_claims_csv", type=str, required=True)
+    parser.add_argument("--party", type=str, required=True, help="Party name for output filename")
     parser.add_argument("--model_name", type=str, required=True)
 
     parser.add_argument("--text_col", type=str, default="speech")
@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument("--speaker_col", type=str, default="speaker")
     parser.add_argument("--speaker_label_col", type=str, default="speaker_label")
 
-    parser.add_argument("--target_party", type=str, default=None)
+    parser.add_argument("--target_party", type=str, default=None, help="Party to filter for extraction (if None, processes all)")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
 
@@ -96,11 +96,10 @@ def main():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
     timestamp_str = f"_{timestamp}" if timestamp else ""
-    base_name = args.target_party + '_' + args.input_csv.split("/")[-1].replace(".csv", f"{timestamp_str}.csv")
-    output_csv = base_name
-    claims_name = base_name.replace(".csv", f"_claims.csv")
-    output_csv_path = os.path.join(args.output_dir, output_csv)
-    output_claims_csv = os.path.join(args.output_dir, claims_name)
+    
+    # Generate output filenames based on party name
+    output_csv = os.path.join(args.output_dir, f"{args.party}_records{timestamp_str}.csv")
+    output_claims_csv = os.path.join(args.output_dir, f"{args.party}_claims{timestamp_str}.csv")
 
     # Load and sort data
     df = pd.read_csv(args.input_csv)
@@ -129,8 +128,8 @@ def main():
 
     # Resume logic
     start_idx = 0
-    if args.resume and os.path.exists(output_csv_path):
-        done_df = pd.read_csv(output_csv_path)
+    if args.resume and os.path.exists(output_csv):
+        done_df = pd.read_csv(output_csv)
         start_idx = len(done_df)
         processed_records = done_df.to_dict("records")
 

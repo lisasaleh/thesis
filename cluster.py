@@ -80,6 +80,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Cluster points using embeddings, UMAP, and HDBSCAN.")
     parser.add_argument("--input_csv", type=str, required=True, help="Input CSV with points to cluster")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for results")
+    parser.add_argument("--party", type=str, required=True, help="Party name for output filename")
     parser.add_argument("--model_name", type=str, default="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
                         help="SentenceTransformer model name")
     parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
@@ -95,7 +96,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2", 
+def main(input_csv, output_dir, party, model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2", 
          add_timestamp=False, min_cluster_size=3, min_samples=1, n_neighbors=8, min_dist=0.0):
     """Main clustering pipeline - clusters per document."""
     os.makedirs(output_dir, exist_ok=True)
@@ -104,7 +105,7 @@ def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-mul
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if add_timestamp else ""
     timestamp_str = f"_{timestamp}" if timestamp else ""
     
-    clustered_file = os.path.join(output_dir, f"clustered_points{timestamp_str}.csv")
+    clustered_file = os.path.join(output_dir, f"{party}_cluster{timestamp_str}.csv")
 
     # Load and prepare data
     df = load_and_prepare_data(input_csv)
@@ -175,5 +176,5 @@ def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-mul
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.input_csv, args.output_dir, args.model_name, args.add_timestamp,
+    main(args.input_csv, args.output_dir, args.party, args.model_name, args.add_timestamp,
          args.min_cluster_size, args.min_samples, args.n_neighbors, args.min_dist)

@@ -137,14 +137,11 @@ def load_state_from_output_cell(cell_value: Any) -> Optional[Dict[str, Any]]:
 def main():
     args = parse_args()
 
-    # Generate output CSV with optional timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
-    timestamp_str = f"_{timestamp}" if timestamp else ""
-    base_name = args.input_csv.split("/")[-1].replace(".csv", f"_summary{timestamp_str}.csv")
-    output_csv = os.path.join(args.output_dir, base_name)
-
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if args.add_timestamp else ""
+    timestamp_str = f"_{timestamp}" if timestamp else ""
 
     df = pd.read_csv(args.input_csv)
     df = df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
@@ -153,92 +150,94 @@ def main():
     llm = LocalLLM(args.model_name)
     print("[DEBUG] Model load finished.", flush=True)
 
-    if args.resume and os.path.exists(output_csv):
-        done_df = pd.read_csv(output_csv)
-        start_idx = len(done_df)
+    # Process each document separately
+    unique_docs = df[args.doc_id_col].unique()
+    print(f"[DEBUG] Processing {len(unique_docs)} document(s)...", flush=True)
 
-        if start_idx > 0:
-            current_doc_id = done_df.iloc[-1][args.doc_id_col]
-            running_state = load_state_from_output_cell(done_df.iloc[-1]["raw_model_output"])
-        else:
-            start_idx = 0
-            current_doc_id = None
-            running_state = None
-    else:
+    for doc_id in unique_docs:
+        # Generate output CSV per document
+        output_csv = os.path.join(args.output_dir, f"{doc_id}_summary{timestamp_str}.csv")
+        
+        # Get rows for this document
+        df_doc = df[df[args.doc_id_col] == doc_id].copy().reset_index(drop=True)
+        
+        print(f"\n[DEBUG] Processing document: {doc_id} ({len(df_doc)} rows)", flush=True)
+        
+        # Resume logic per document
+        processed_records = []
         start_idx = 0
-        current_doc_id = None
         running_state = None
+        
+        if args.resume and os.path.exists(output_csv):
+            done_df = pd.read_csv(output_csv)
+            start_idx = len(done_df)
+            processed_records = done_df.to_dict("records")
+            
+            if start_idx > 0:
+                running_state = load_state_from_output_cell(done_df.iloc[-1]["raw_model_output"])
+            
+            print(f"[DEBUG] Resume enabled for {doc_id} | start_idx={start_idx}", flush=True)
+        
+        # Process rows for this document
+        for i in tqdm(range(start_idx, len(df_doc)), total=len(df_doc) - start_idx, desc=f"Doc {doc_id}"):
+            row = df_doc.iloc[i]
+            
+            text = str(row[args.text_col]) if pd.notna(row[args.text_col]) else ""
+            word_count = len(text.split())
 
-    records = []
+            summary_before = (
+                running_state.get("updated_summary", "") if running_state is not None else ""
+            )
+            state_before_json = (
+                json.dumps(running_state, ensure_ascii=False) if running_state is not None else ""
+            )
 
-    print(f"[DEBUG] Starting from index {start_idx}", flush=True)
-
-    for i in tqdm(range(start_idx, len(df)), total=len(df) - start_idx):
-        row = df.iloc[i]
-        row_doc_id = row[args.doc_id_col]
-
-        if row_doc_id != current_doc_id:
-            current_doc_id = row_doc_id
-            running_state = None
-
-        text = str(row[args.text_col]) if pd.notna(row[args.text_col]) else ""
-        word_count = len(text.split())
-
-        summary_before = (
-            running_state.get("updated_summary", "") if running_state is not None else ""
-        )
-        state_before_json = (
-            json.dumps(running_state, ensure_ascii=False) if running_state is not None else ""
-        )
-
-        if word_count < 15:
-            running_summary_after = summary_before
-            raw_output = "SKIPPED: too short"
-            skipped = True
-
-        else:
-            try:
-                result = update_running_summary(
-                    llm=llm,
-                    current_state=running_state,
-                    new_intervention_text=text,
-                    speaker=str(row[args.speaker_col]) if pd.notna(row[args.speaker_col]) else "Onbekend",
-                    party=str(row[args.party_col]) if pd.notna(row[args.party_col]) else "Onbekend",
-                    idx=int(row[args.order_col]),
-                    max_words=args.max_words,
-                )
-
-                running_state = result
-                raw_output = json.dumps(result, ensure_ascii=False)
-                running_summary_after = result.get("updated_summary", "")
-                skipped = False
-
-            except Exception as e:
-                raw_output = f"ERROR: {str(e)}"
+            if word_count < 15:
                 running_summary_after = summary_before
-                skipped = False
-                # running_state blijft ongewijzigd
+                raw_output = "SKIPPED: too short"
+                skipped = True
 
-        record = row.to_dict()
-        record["summary_before"] = summary_before
-        record["state_before_json"] = state_before_json
-        record["running_summary_after"] = running_summary_after
-        record["raw_model_output"] = raw_output
-        record["skipped"] = skipped
-        record["word_count"] = word_count
+            else:
+                try:
+                    result = update_running_summary(
+                        llm=llm,
+                        current_state=running_state,
+                        new_intervention_text=text,
+                        speaker=str(row[args.speaker_col]) if pd.notna(row[args.speaker_col]) else "Onbekend",
+                        party=str(row[args.party_col]) if pd.notna(row[args.party_col]) else "Onbekend",
+                        idx=int(row[args.order_col]),
+                        max_words=args.max_words,
+                    )
 
-        records.append(record)
+                    running_state = result
+                    raw_output = json.dumps(result, ensure_ascii=False)
+                    running_summary_after = result.get("updated_summary", "")
+                    skipped = False
 
-        if (i + 1) % args.checkpoint_every == 0:
-            # Always save all accumulated records (not just the current batch)
-            out_df = pd.DataFrame(records)
+                except Exception as e:
+                    raw_output = f"ERROR: {str(e)}"
+                    running_summary_after = summary_before
+                    skipped = False
+
+            record = row.to_dict()
+            record["summary_before"] = summary_before
+            record["state_before_json"] = state_before_json
+            record["running_summary_after"] = running_summary_after
+            record["raw_model_output"] = raw_output
+            record["skipped"] = skipped
+            record["word_count"] = word_count
+
+            processed_records.append(record)
+
+            if (i + 1) % args.checkpoint_every == 0:
+                out_df = pd.DataFrame(processed_records)
+                out_df.to_csv(output_csv, index=False)
+        
+        # Final save for this document
+        if processed_records:
+            out_df = pd.DataFrame(processed_records)
             out_df.to_csv(output_csv, index=False)
-
-    if records:
-        out_df = pd.DataFrame(records)
-        out_df.to_csv(output_csv, index=False)
-
-    print(f"[DEBUG] Saved output to {output_csv}", flush=True)
+            print(f"[DEBUG] Saved {len(processed_records)} rows to {output_csv}", flush=True)
 
 
 if __name__ == "__main__":

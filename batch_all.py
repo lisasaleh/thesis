@@ -9,8 +9,10 @@ import os
 import subprocess
 import argparse
 import json
+import glob
 from datetime import datetime
 from pathlib import Path
+import pandas as pd
 
 
 def run_command(cmd, description):
@@ -128,20 +130,19 @@ def main():
     
     # Step 1: Extract
     if not args.skip_extract and "extract" not in completed_steps:
-        extract_output = get_output_filename(args.input_csv, args.extract_dir, "claims", timestamp_str)
         steps.append({
             "name": "extract",
             "cmd": [
                 "python", "extract.py",
                 "--input_csv", args.input_csv,
                 "--output_dir", args.extract_dir,
-                "--output_claims_csv", extract_output,
+                "--party", args.party,
                 "--model_name", args.model_7b,
                 "--target_party", args.party,
                 *(["--add_timestamp"] if args.add_timestamp else []),
                 *(["--resume"] if args.resume else []),
             ],
-            "output": extract_output
+            "output": None
         })
     
     # Step 2: Incremental Summary
@@ -162,34 +163,44 @@ def main():
     
     # Step 3: Normalize
     if not args.skip_normalize and "normalize" not in completed_steps:
-        # Find latest extract and summary outputs
-        extract_output = find_latest_file(args.extract_dir, f"{Path(args.input_csv).stem}_claims")
-        summary_output = find_latest_file(args.summary_dir, f"{Path(args.input_csv).stem}_summary")
+        # Find latest extract output
+        extract_output = find_latest_file(args.extract_dir, f"{args.party}_claims")
         
-        if not extract_output or not summary_output:
-            print("[ERROR] Cannot find extract or summary outputs for normalize step")
+        if not extract_output:
+            print("[ERROR] Cannot find extract output for normalize step")
             return
         
-        normalize_output = get_output_filename(args.input_csv, args.normalize_dir, "normalized_points", timestamp_str)
+        # Combine all summary files from summary_dir
+        summary_files = sorted(glob.glob(os.path.join(args.summary_dir, "*_summary*.csv")))
+        if not summary_files:
+            print("[ERROR] Cannot find any summary files for normalize step")
+            return
+        
+        # Combine all summaries into one temp file
+        combined_summaries = pd.concat([pd.read_csv(f) for f in summary_files], ignore_index=True)
+        combined_summary_file = os.path.join(args.summary_dir, ".combined_summaries_temp.csv")
+        combined_summaries.to_csv(combined_summary_file, index=False)
+        
         steps.append({
             "name": "normalize",
             "cmd": [
                 "python", "normalize.py",
                 "--claims_csv", extract_output,
                 "--debates_csv", args.input_csv,
-                "--summaries_csv", summary_output,
+                "--summaries_csv", combined_summary_file,
                 "--output_dir", args.normalize_dir,
+                "--party", args.party,
                 "--model_name", args.model_32b,
                 *(["--add_timestamp"] if args.add_timestamp else []),
                 *(["--resume"] if args.resume else []),
             ],
-            "output": normalize_output
+            "output": None
         })
     
     # Step 4: Cluster
     if not args.skip_cluster and "cluster" not in completed_steps:
         # Find latest normalize output
-        normalize_output = find_latest_file(args.normalize_dir, f"{Path(args.input_csv).stem}_normalized_points")
+        normalize_output = find_latest_file(args.normalize_dir, f"{args.party}_normalized")
         
         if not normalize_output:
             print("[ERROR] Cannot find normalize output for cluster step")
@@ -201,6 +212,7 @@ def main():
                 "python", "cluster.py",
                 "--input_csv", normalize_output,
                 "--output_dir", args.cluster_dir,
+                "--party", args.party,
                 "--min_cluster_size", str(args.min_cluster_size),
                 "--min_samples", str(args.min_samples),
                 "--n_neighbors", str(args.n_neighbors),
@@ -213,7 +225,7 @@ def main():
     # Step 5: Selection
     if not args.skip_selection and "selection" not in completed_steps:
         # Find latest cluster output
-        cluster_output = find_latest_file(args.cluster_dir, f"{Path(args.input_csv).stem}_clustered_points")
+        cluster_output = find_latest_file(args.cluster_dir, f"{args.party}_cluster")
         
         if not cluster_output:
             print("[ERROR] Cannot find cluster output for selection step")

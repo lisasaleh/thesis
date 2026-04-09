@@ -15,6 +15,6 @@ source activate thesis
 
 srun python run_clustering.py \
   --input_csv outputs/VVD_debate_sample_terrorist_20260403_122703_claims_normalized_20260403_124817.csv \
-  --output_dir outputs/ \
+  --output_dir outputs/clusters/ \
   --add_timestamp
 

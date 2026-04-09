@@ -16,7 +16,7 @@ source activate thesis
 srun python extract.py \
   --input_csv data/debate_sample_terrorist.csv \
   --output_dir outputs/ \
-  --output_claims_csv outputs/ \
+  --output_claims_dir outputs/extracted/ \
   --model_name Qwen/Qwen2.5-7B-Instruct \
   --target_party VVD \
   --add_timestamp

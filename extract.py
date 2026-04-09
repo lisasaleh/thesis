@@ -203,11 +203,11 @@ def main():
         flattened_claims.extend(temp_flat)
 
         # Incremental saving (safe for crashes)
-        pd.DataFrame(processed_records).to_csv(output_csv_path, index=False)
+        pd.DataFrame(processed_records).to_csv(output_csv, index=False)
         pd.DataFrame(flattened_claims).to_csv(output_claims_csv, index=False)
 
     # Final save
-    pd.DataFrame(processed_records).to_csv(output_csv_path, index=False)
+    pd.DataFrame(processed_records).to_csv(output_csv, index=False)
     pd.DataFrame(flattened_claims).to_csv(output_claims_csv, index=False)
 
     print("[DEBUG] Extraction finished successfully.", flush=True)

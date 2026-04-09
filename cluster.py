@@ -97,7 +97,7 @@ def parse_args():
 
 def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2", 
          add_timestamp=False, min_cluster_size=3, min_samples=1, n_neighbors=8, min_dist=0.0):
-    """Main clustering pipeline."""
+    """Main clustering pipeline - clusters per document."""
     os.makedirs(output_dir, exist_ok=True)
     
     # Generate output filename with optional timestamp
@@ -108,44 +108,67 @@ def main(input_csv, output_dir, model_name="sentence-transformers/paraphrase-mul
 
     # Load and prepare data
     df = load_and_prepare_data(input_csv)
-
-    # Cluster on unique points
-    df_unique = df.drop_duplicates(subset=["point_clean"]).copy().reset_index(drop=True)
-
-    # Generate embeddings
+    
+    # Initialize embedder once
     print("[DEBUG] Loading embedding model...", flush=True)
     embedder = Embedder(model_name=model_name)
-    embeddings = embedder.encode(df_unique["point_clean"].tolist())
-    print("[DEBUG] Embeddings generated.", flush=True)
-
-    # Reduce dimensionality
-    print("[DEBUG] Reducing dimensionality with UMAP...", flush=True)
-    reduced = reduce_embeddings(embeddings, n_neighbors=n_neighbors, min_dist=min_dist)
-    print("[DEBUG] Dimensionality reduction complete.", flush=True)
-
-    # Cluster embeddings
-    print("[DEBUG] Clustering with HDBSCAN...", flush=True)
-    labels, probs, _ = cluster_hdbscan(reduced, min_cluster_size=min_cluster_size, min_samples=min_samples)
-    print("[DEBUG] Clustering complete.", flush=True)
-
-    df_unique["cluster_id"] = labels
-    df_unique["cluster_confidence"] = probs
-
-    # Map cluster labels back to full dataset
-    cluster_map = df_unique[["point_clean", "cluster_id", "cluster_confidence"]].drop_duplicates()
-    df_full = df.merge(cluster_map, on="point_clean", how="left")
-
+    print("[DEBUG] Embeddings model loaded.", flush=True)
+    
+    # Store results per document
+    all_results = []
+    
+    # Cluster per document
+    unique_docs = df["document_id"].unique()
+    print(f"[DEBUG] Clustering {len(unique_docs)} document(s)...", flush=True)
+    
+    for doc_id in unique_docs:
+        df_doc = df[df["document_id"] == doc_id].copy()
+        
+        # Get unique points in this document
+        df_doc_unique = df_doc.drop_duplicates(subset=["point_clean"]).copy().reset_index(drop=True)
+        
+        if len(df_doc_unique) == 0:
+            continue
+        
+        print(f"\n[DEBUG] Processing document: {doc_id} ({len(df_doc_unique)} unique points)")
+        
+        # Generate embeddings for this document's points
+        embeddings = embedder.encode(df_doc_unique["point_clean"].tolist())
+        
+        # Reduce dimensionality
+        reduced = reduce_embeddings(embeddings, n_neighbors=n_neighbors, min_dist=min_dist)
+        
+        # Cluster embeddings
+        labels, probs, _ = cluster_hdbscan(reduced, min_cluster_size=min_cluster_size, min_samples=min_samples)
+        
+        # Assign cluster IDs with document prefix to ensure global uniqueness
+        df_doc_unique["cluster_id"] = [f"{doc_id}_cluster_{label}" if label != -1 else -1 for label in labels]
+        df_doc_unique["cluster_confidence"] = probs
+        
+        print(f"  Clusters: {len(set(label for label in labels if label != -1))} | Noise: {(labels == -1).sum()}")
+        
+        # Map back to full document data
+        cluster_map = df_doc_unique[["point_clean", "cluster_id", "cluster_confidence"]].drop_duplicates()
+        df_doc_clustered = df_doc.merge(cluster_map, on="point_clean", how="left")
+        
+        all_results.append(df_doc_clustered)
+    
+    # Combine all documents
+    df_output_full = pd.concat(all_results, ignore_index=True)
+    
     # Select and save essential columns
     output_cols = ["document_id", "party", "point", "cluster_id", "cluster_confidence", "speaker", "intervention_id"]
-    df_output = df_full[output_cols].copy()
+    df_output = df_output_full[output_cols].copy()
     df_output.to_csv(clustered_file, index=False)
 
     # Print summary
     print("\n[SUMMARY]")
     print(f"Total rows: {len(df)}")
-    print(f"Unique points: {len(df_unique)}")
-    print(f"Clusters found: {len(set(labels)) - (1 if -1 in labels else 0)}")
-    print(f"Noise points: {(labels == -1).sum()}")
+    print(f"Documents processed: {len(unique_docs)}")
+    total_clusters = len(set(cid for cid in df_output["cluster_id"] if cid != -1))
+    total_noise = (df_output["cluster_id"] == -1).sum()
+    print(f"Total clusters (all docs): {total_clusters}")
+    print(f"Total noise points: {total_noise}")
     print(f"\nOutput file:")
     print(f"  - {clustered_file}")
 

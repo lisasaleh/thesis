@@ -23,7 +23,6 @@ PARTIES = [
     "SGP",
     "PvdD",
     "50PLUS",
-    # add the missing 12th party here if needed
 ]
 
 PARTY_PATTERN = "|".join(re.escape(p) for p in PARTIES)
@@ -150,14 +149,34 @@ def split_interventions(text: str):
 # load data
 df_pages = pd.read_csv("rutte_ii.csv")
 
-# sample docs
-N_DOCS = 30
+# Get all unique document IDs (in order)
+all_doc_ids = df_pages["foi_documentId"].unique()
 
-sample_doc_ids = (
-    df_pages["foi_documentId"]
-    .drop_duplicates()
-    .sample(N_DOCS, random_state=42)
-)
+# Loop through documents until we have 20 with VVD speakers
+N_DOCS = 20
+vvd_doc_ids = []
+
+for doc_id in all_doc_ids:
+    if len(vvd_doc_ids) >= N_DOCS:
+        break
+    
+    df_doc = df_pages[df_pages["foi_documentId"] == doc_id].copy()
+    df_doc = df_doc.sort_values("foi_pageNumber")
+    
+    df_doc["clean_text"] = df_doc["foi_bodyText"].apply(clean_page_text)
+    full_text = " ".join(df_doc["clean_text"].tolist())
+    full_text = re.sub(r"\s+", " ", full_text).strip()
+    
+    interventions = split_interventions(full_text)
+    
+    # Check if VVD speaks in this debate
+    has_vvd = any(interv["party"] == "VVD" for interv in interventions)
+    if has_vvd:
+        vvd_doc_ids.append(doc_id)
+
+print(f"Found {len(vvd_doc_ids)} debates with VVD speakers")
+
+sample_doc_ids = vvd_doc_ids
 
 all_interventions = []
 
@@ -189,5 +208,5 @@ df_interventions = pd.DataFrame(all_interventions)
 df_interventions["n_words"] = df_interventions["speech"].str.split().str.len()
 df_interventions["preview"] = df_interventions["speech"].str[:200]
 
-df_interventions.to_csv("intervention_sample_30docs.csv", index=False)
+df_interventions.to_csv("sample_20_VVD.csv", index=False)
 print(f"Saved {len(df_interventions)} interventions.")

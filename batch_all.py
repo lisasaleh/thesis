@@ -1,8 +1,8 @@
 """
-Batch orchestrator for the full pipeline: extract → summarize → normalize → cluster
+Batch orchestrator for the full pipeline: extract → summarize → normalize → cluster → select
 
 Usage:
-    python batch_all.py --input_csv data/VVD_debat.csv --party VVD --model_7b Qwen/Qwen2.5-7B-Instruct --model_32b /path/to/Qwen2.5-32B-Instruct
+    python batch_all.py --input_csv data/VVD_debat.csv --party VVD --model_7b Qwen/Qwen2.5-7B-Instruct --model_32b /path/to/Qwen2.5-32B-Instruct --selection_model_name klue/bert-base
 """
 
 import os
@@ -31,7 +31,7 @@ def run_command(cmd, description):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Batch orchestrator for extract → summarize → normalize → cluster pipeline"
+        description="Batch orchestrator for extract → summarize → normalize → cluster → select pipeline"
     )
     
     # Required arguments
@@ -55,6 +55,8 @@ def parse_args():
                         help="Output directory for normalized claims")
     parser.add_argument("--cluster_dir", type=str, default="outputs/clustering",
                         help="Output directory for clustering results")
+    parser.add_argument("--selection_dir", type=str, default="outputs/selection",
+                        help="Output directory for selection results")
     
     # Optional flags
     parser.add_argument("--add_timestamp", action="store_true",
@@ -65,12 +67,23 @@ def parse_args():
     parser.add_argument("--skip_summarize", action="store_true", help="Skip summarization step")
     parser.add_argument("--skip_normalize", action="store_true", help="Skip normalization step")
     parser.add_argument("--skip_cluster", action="store_true", help="Skip clustering step")
+    parser.add_argument("--skip_selection", action="store_true", help="Skip selection step")
     
     # Clustering parameters
     parser.add_argument("--min_cluster_size", type=int, default=3)
     parser.add_argument("--min_samples", type=int, default=1)
     parser.add_argument("--n_neighbors", type=int, default=8)
     parser.add_argument("--min_dist", type=float, default=0.0)
+    
+    # Selection parameters
+    parser.add_argument("--selection_model_name", type=str, default="microsoft/deberta-base",
+                        help="HF model for pairwise match classification")
+    parser.add_argument("--selection_threshold", type=float, default=0.5,
+                        help="Probability threshold for positive match in selection")
+    parser.add_argument("--selection_batch_size", type=int, default=16,
+                        help="Batch size for selection model inference")
+    parser.add_argument("--keep_cluster_metadata", action="store_true",
+                        help="Keep original cluster metadata in selection output")
     
     return parser.parse_args()
 
@@ -193,6 +206,30 @@ def main():
                 "--n_neighbors", str(args.n_neighbors),
                 "--min_dist", str(args.min_dist),
                 *(["--add_timestamp"] if args.add_timestamp else []),
+            ],
+            "output": None
+        })
+    
+    # Step 5: Selection
+    if not args.skip_selection and "selection" not in completed_steps:
+        # Find latest cluster output
+        cluster_output = find_latest_file(args.cluster_dir, f"{Path(args.input_csv).stem}_clustered_points")
+        
+        if not cluster_output:
+            print("[ERROR] Cannot find cluster output for selection step")
+            return
+        
+        steps.append({
+            "name": "selection",
+            "cmd": [
+                "python", "selection.py",
+                "--input_csv", cluster_output,
+                "--output_dir", args.selection_dir,
+                "--party", args.party,
+                "--model_name", args.selection_model_name,
+                "--threshold", str(args.selection_threshold),
+                "--batch_size", str(args.selection_batch_size),
+                *(["--keep_cluster_metadata"] if args.keep_cluster_metadata else []),
             ],
             "output": None
         })

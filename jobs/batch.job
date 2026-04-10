@@ -18,6 +18,4 @@ python batch_all.py \
   --party VVD \
   --model_7b Qwen/Qwen2.5-7B-Instruct \
   --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
-  --skip_normalize \
-  --skip_cluster \
-  --skip_selection
+  --resume

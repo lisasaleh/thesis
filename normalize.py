@@ -182,7 +182,14 @@ def main():
         party = str(debate_row.get(args.party_col, "")).strip()
         intervention_text = str(debate_row[args.text_col]) if pd.notna(debate_row[args.text_col]) else ""
         intervention = f"{speaker} ({party}): {intervention_text}"
-        summary = str(summaries_lookup.loc[(doc_id, intervention_id)]["running_summary_after"]) if pd.notna(summaries_lookup.loc[(doc_id, intervention_id)]["running_summary_after"]) else ""
+        
+        # Safely extract summary from lookup
+        summary = ""
+        if (doc_id, intervention_id) in summaries_lookup.index:
+            summary_row = summaries_lookup.loc[(doc_id, intervention_id)]
+            if isinstance(summary_row, pd.DataFrame):
+                summary_row = summary_row.iloc[0]
+            summary = str(summary_row["running_summary_after"]) if pd.notna(summary_row["running_summary_after"]) else ""
 
         previous_interventions = build_previous_interventions_text(
             debates_df=debates_df,

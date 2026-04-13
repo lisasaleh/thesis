@@ -201,6 +201,9 @@ def main():
     if not args.skip_cluster and "cluster" not in completed_steps:
         # Find latest normalize output
         normalize_output = find_latest_file(args.normalize_dir, f"{args.party}_normalized")
+        print(f"[DEBUG] Looking for normalize output in {args.normalize_dir} with pattern {args.party}_normalized")
+        print(f"[DEBUG] Files in {args.normalize_dir}: {os.listdir(args.normalize_dir) if os.path.exists(args.normalize_dir) else 'DIR NOT FOUND'}")
+        print(f"[DEBUG] normalize_output = {normalize_output}")
         
         if not normalize_output:
             print("[ERROR] Cannot find normalize output for cluster step")
@@ -226,6 +229,9 @@ def main():
     if not args.skip_selection and "selection" not in completed_steps:
         # Find latest cluster output
         cluster_output = find_latest_file(args.cluster_dir, f"{args.party}_cluster")
+        print(f"[DEBUG] Looking for cluster output in {args.cluster_dir} with pattern {args.party}_cluster")
+        print(f"[DEBUG] Files in {args.cluster_dir}: {os.listdir(args.cluster_dir) if os.path.exists(args.cluster_dir) else 'DIR NOT FOUND'}")
+        print(f"[DEBUG] cluster_output = {cluster_output}")
         
         if not cluster_output:
             print("[ERROR] Cannot find cluster output for selection step")

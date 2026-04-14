@@ -13,7 +13,7 @@ module load Anaconda3/2025.06-1
 
 source activate thesis
 
-conda install -y pytorch::pytorch pytorch::pytorch-cuda=12.1 -c pytorch
+pip install --upgrade --force-reinstall torch>=2.6 --index-url https://download.pytorch.org/whl/cu121
 
 echo "Checking PyTorch version..."
 python -c "import torch; print(f'PyTorch version: {torch.__version__}')"

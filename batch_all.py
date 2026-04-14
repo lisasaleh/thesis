@@ -78,7 +78,7 @@ def parse_args():
     parser.add_argument("--min_dist", type=float, default=0.0)
     
     # Selection parameters
-    parser.add_argument("--selection_model_name", type=str, default="microsoft/xlm-roberta-base",
+    parser.add_argument("--selection_model_name", type=str, default="xlm-roberta-base",
                         help="HF model for pairwise match classification")
     parser.add_argument("--selection_threshold", type=float, default=0.5,
                         help="Probability threshold for positive match in selection")

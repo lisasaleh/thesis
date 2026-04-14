@@ -78,7 +78,7 @@ def parse_args():
     parser.add_argument("--min_dist", type=float, default=0.0)
     
     # Selection parameters
-    parser.add_argument("--selection_model_name", type=str, default="microsoft/deberta-base",
+    parser.add_argument("--selection_model_name", type=str, default="microsoft/xlm-roberta-base",
                         help="HF model for pairwise match classification")
     parser.add_argument("--selection_threshold", type=float, default=0.5,
                         help="Probability threshold for positive match in selection")
@@ -199,9 +199,9 @@ def main():
     
     # Step 4: Cluster
     if not args.skip_cluster and "cluster" not in completed_steps:
-        # Find latest normalize output
-        normalize_output = find_latest_file(args.normalize_dir, f"{args.party}_normalized")
-        print(f"[DEBUG] Looking for normalize output in {args.normalize_dir} with pattern {args.party}_normalized")
+        # Find latest normalize output (main file, not records)
+        normalize_output = find_latest_file(args.normalize_dir, f"{args.party}_normalized.csv")
+        print(f"[DEBUG] Looking for normalize output in {args.normalize_dir} with pattern {args.party}_normalized.csv")
         print(f"[DEBUG] Files in {args.normalize_dir}: {os.listdir(args.normalize_dir) if os.path.exists(args.normalize_dir) else 'DIR NOT FOUND'}")
         print(f"[DEBUG] normalize_output = {normalize_output}")
         

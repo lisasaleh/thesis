@@ -47,7 +47,11 @@ class KPMSelector:
         self.device = device
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+        )
         self.model.to(self.device)
         self.model.eval()
 

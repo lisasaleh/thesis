@@ -13,6 +13,8 @@ module load Anaconda3/2025.06-1
 
 source activate thesis
 
+pip install --upgrade torch>=2.6 --index-url https://download.pytorch.org/whl/cu121
+
 srun python batch_all.py \
   --input_csv data/debate_sample_terrorist.csv \
   --party VVD \

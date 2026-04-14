@@ -13,7 +13,10 @@ module load Anaconda3/2025.06-1
 
 source activate thesis
 
-pip install --upgrade torch>=2.6 --index-url https://download.pytorch.org/whl/cu121
+conda install -y pytorch::pytorch pytorch::pytorch-cuda=12.1 -c pytorch
+
+echo "Checking PyTorch version..."
+python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
 
 srun python batch_all.py \
   --input_csv data/debate_sample_terrorist.csv \

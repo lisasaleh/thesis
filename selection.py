@@ -1,96 +1,34 @@
 import argparse
-import itertools
-import math
 import os
-from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any
+from typing import List, Dict, Any
 
 import numpy as np
 import pandas as pd
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 
-@dataclass
-class PairScore:
-    i: int
-    j: int
-    prob: float
-    pred: int
-
-
-class KPMSelector:
+class CentroidSelector:
     """
-    Pairwise cluster representative selector.
+    Cluster representative selector using centroid-based approach.
 
     For each cluster:
-    1. score all unordered pairs of claims with a sequence classification model
-    2. count positive matches per claim
-    3. select the claim with the highest support as the representative
+    1. Embed all claims using sentence transformer
+    2. Compute cluster centroid as mean embedding
+    3. Find claim with highest cosine similarity to centroid
+    4. Select that claim as representative
     """
 
     def __init__(
         self,
-        model_name: str,
-        threshold: float = 0.5,
-        batch_size: int = 16,
-        max_length: int = 256,
+        model_name: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
         device: str = None,
     ):
         self.model_name = model_name
-        self.threshold = threshold
-        self.batch_size = batch_size
-        self.max_length = max_length
-
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
-
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            model_name,
-            trust_remote_code=True,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-        )
-        self.model.to(self.device)
-        self.model.eval()
-
-    @torch.no_grad()
-    def score_pairs(self, texts_a: List[str], texts_b: List[str]) -> List[float]:
-        """
-        Returns P(match) for each pair.
-
-        Supports:
-        - binary classifier with 1 logit -> sigmoid
-        - 2+ label classifier -> softmax, uses last label as positive class
-        """
-        probs = []
-
-        for start in range(0, len(texts_a), self.batch_size):
-            batch_a = texts_a[start:start + self.batch_size]
-            batch_b = texts_b[start:start + self.batch_size]
-
-            enc = self.tokenizer(
-                batch_a,
-                batch_b,
-                padding=True,
-                truncation=True,
-                max_length=self.max_length,
-                return_tensors="pt",
-            )
-            enc = {k: v.to(self.device) for k, v in enc.items()}
-
-            outputs = self.model(**enc)
-            logits = outputs.logits
-
-            if logits.shape[-1] == 1:
-                batch_probs = torch.sigmoid(logits.squeeze(-1))
-            else:
-                batch_probs = torch.softmax(logits, dim=-1)[:, -1]
-
-            probs.extend(batch_probs.detach().cpu().tolist())
-
-        return probs
+        print(f"[DEBUG] Loading embedding model: {model_name}")
+        self.model = SentenceTransformer(model_name, device=device)
+        print(f"[DEBUG] Model loaded successfully")
 
     def select_representative(
         self,
@@ -99,7 +37,7 @@ class KPMSelector:
         id_col: str = None,
     ) -> Dict[str, Any]:
         """
-        Select representative for one cluster.
+        Select representative for one cluster using centroid method.
         """
         cluster_df = cluster_df.reset_index(drop=True).copy()
         texts = cluster_df[text_col].fillna("").astype(str).tolist()
@@ -115,105 +53,46 @@ class KPMSelector:
                 "representative_text": row[text_col],
                 "representative_uid": row[id_col] if id_col and id_col in cluster_df.columns else None,
                 "cluster_size": 1,
-                "best_match_count": 0,
-                "best_match_sum": 0.0,
-                "avg_match_prob": 0.0,
+                "centroid_similarity": 1.0,
                 "representative_quality": "singleton",
             }
 
-        pair_indices = list(itertools.combinations(range(n), 2))
-        texts_a = [texts[i] for i, _ in pair_indices]
-        texts_b = [texts[j] for _, j in pair_indices]
-
-        pair_probs = self.score_pairs(texts_a, texts_b)
-
-        # symmetric support matrix
-        support_counts = np.zeros(n, dtype=int)
-        support_sums = np.zeros(n, dtype=float)
-        all_pair_probs_per_claim = [[] for _ in range(n)]
-
-        scored_pairs: List[PairScore] = []
-        for (i, j), prob in zip(pair_indices, pair_probs):
-            pred = int(prob >= self.threshold)
-            scored_pairs.append(PairScore(i=i, j=j, prob=prob, pred=pred))
-
-            if pred == 1:
-                support_counts[i] += 1
-                support_counts[j] += 1
-
-            support_sums[i] += prob
-            support_sums[j] += prob
-
-            all_pair_probs_per_claim[i].append(prob)
-            all_pair_probs_per_claim[j].append(prob)
-
-        avg_probs = np.array(
-            [
-                float(np.mean(p_list)) if len(p_list) > 0 else 0.0
-                for p_list in all_pair_probs_per_claim
-            ]
-        )
-
-        # Ranking:
-        # 1. most positive matches
-        # 2. highest summed probability
-        # 3. highest average probability
-        # 4. shortest claim (slightly favors concise key points)
-        # 5. first occurrence
-        lengths = np.array([len(t) for t in texts])
-
-        candidate_order = sorted(
-            range(n),
-            key=lambda idx: (
-                support_counts[idx],
-                support_sums[idx],
-                avg_probs[idx],
-                -lengths[idx],   # shorter is better -> invert in ascending sort later? no, see reverse=True
-                -idx
-            ),
-            reverse=True
-        )
-        best_idx = candidate_order[0]
-
-        # Diagnostic label for cluster quality
-        max_possible_matches = n - 1
-        best_count = int(support_counts[best_idx])
-        best_sum = float(support_sums[best_idx])
-        best_avg = float(avg_probs[best_idx])
-
-        # Heuristic quality label
-        # strong: representative matches at least half of the cluster
-        # weak: best candidate exists but has limited support
-        if best_count >= math.ceil(max_possible_matches / 2):
-            quality = "strong"
-        else:
-            quality = "weak"
-
+        # Embed all texts
+        embeddings = self.model.encode(texts)  # shape: (n, embedding_dim)
+        
+        # Compute centroid
+        centroid = np.mean(embeddings, axis=0)  # shape: (embedding_dim,)
+        
+        # Compute cosine similarity from each embedding to centroid
+        similarities = cosine_similarity(
+            embeddings.reshape(n, -1),
+            centroid.reshape(1, -1)
+        ).flatten()  # shape: (n,)
+        
+        # Find the index with max similarity
+        best_idx = np.argmax(similarities)
+        best_similarity = float(similarities[best_idx])
+        
         row = cluster_df.iloc[best_idx]
         return {
             "representative_idx": int(best_idx),
             "representative_text": row[text_col],
             "representative_uid": row[id_col] if id_col and id_col in cluster_df.columns else None,
             "cluster_size": int(n),
-            "best_match_count": best_count,
-            "best_match_sum": round(best_sum, 6),
-            "avg_match_prob": round(best_avg, 6),
-            "representative_quality": quality,
+            "centroid_similarity": round(best_similarity, 6),
+            "representative_quality": "centroid",
         }
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Select one representative claim per cluster using pairwise KPM scoring.")
+    parser = argparse.ArgumentParser(description="Select one representative claim per cluster using centroid-based method.")
     parser.add_argument("--input_csv", type=str, required=True, help="Path to clustered CSV.")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for selection results.")
     parser.add_argument("--party", type=str, required=True, help="Party name for output filename.")
-    parser.add_argument("--model_name", type=str, required=True, help="HF model for pairwise match classification.")
+    parser.add_argument("--model_name", type=str, default="sentence-transformers/paraphrase-multilingual-mpnet-base-v2", help="Sentence transformer model for embeddings.")
     parser.add_argument("--cluster_col", type=str, default="cluster_id", help="Cluster column.")
     parser.add_argument("--text_col", type=str, default="point", help="Text column containing normalized claims.")
     parser.add_argument("--id_col", type=str, default="point_uid", help="Optional unique claim id column.")
-    parser.add_argument("--threshold", type=float, default=0.5, help="Probability threshold for positive match.")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for model inference.")
-    parser.add_argument("--max_length", type=int, default=256, help="Max tokenizer length.")
     parser.add_argument("--device", type=str, default=None, help="cpu or cuda. Default: auto.")
     parser.add_argument(
         "--keep_cluster_metadata",
@@ -238,11 +117,8 @@ def main():
         if col not in df.columns:
             raise ValueError(f"Required column '{col}' not found in input CSV.")
 
-    selector = KPMSelector(
+    selector = CentroidSelector(
         model_name=args.model_name,
-        threshold=args.threshold,
-        batch_size=args.batch_size,
-        max_length=args.max_length,
         device=args.device,
     )
 
@@ -270,9 +146,7 @@ def main():
             "representative_text": rep["representative_text"],
             "representative_uid": rep["representative_uid"],
             "cluster_size": rep["cluster_size"],
-            "best_match_count": rep["best_match_count"],
-            "best_match_sum": rep["best_match_sum"],
-            "avg_match_prob": rep["avg_match_prob"],
+            "centroid_similarity": rep["centroid_similarity"],
             "representative_quality": rep["representative_quality"],
         }
 

@@ -78,12 +78,8 @@ def parse_args():
     parser.add_argument("--min_dist", type=float, default=0.0)
     
     # Selection parameters
-    parser.add_argument("--selection_model_name", type=str, default="xlm-roberta-base",
-                        help="HF model for pairwise match classification")
-    parser.add_argument("--selection_threshold", type=float, default=0.5,
-                        help="Probability threshold for positive match in selection")
-    parser.add_argument("--selection_batch_size", type=int, default=16,
-                        help="Batch size for selection model inference")
+    parser.add_argument("--selection_model_name", type=str, default="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+                        help="Sentence transformer model for embedding-based selection")
     parser.add_argument("--keep_cluster_metadata", action="store_true",
                         help="Keep original cluster metadata in selection output")
     
@@ -245,8 +241,6 @@ def main():
                 "--output_dir", args.selection_dir,
                 "--party", args.party,
                 "--model_name", args.selection_model_name,
-                "--threshold", str(args.selection_threshold),
-                "--batch_size", str(args.selection_batch_size),
                 *(["--keep_cluster_metadata"] if args.keep_cluster_metadata else []),
             ],
             "output": None

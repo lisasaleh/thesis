@@ -1,14 +1,19 @@
 """
 Normalize manifesto claims using LLM with local context (surrounding sentences).
 
-Usage:
+Usage - Single party:
     python normalize_manifesto.py \
-        --manifesto_csv manifesto/manifest_GL.csv \
+        --manifesto_dir manifesto \
         --output_dir outputs/manifesto \
         --party GL \
-        --model_name /path/to/Qwen2.5-32B-Instruct \
-        --top_codes 10 \
-        --context_window 10
+        --model_name /path/to/Qwen2.5-32B-Instruct
+
+Usage - All parties:
+    python normalize_manifesto.py \
+        --manifesto_dir manifesto \
+        --output_dir outputs/manifesto \
+        --party all \
+        --model_name /path/to/Qwen2.5-32B-Instruct
 """
 
 import os
@@ -103,7 +108,7 @@ def clean_sentence(sentence: str) -> str:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Normalize manifesto claims with LLM.")
-    parser.add_argument("--manifesto_csv", type=str, default=None, help="Path to manifesto CSV (optional if --party=all).")
+    parser.add_argument("--manifesto_dir", type=str, required=True, help="Directory containing manifest_*.csv files.")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for normalized manifesto.")
     parser.add_argument("--party", type=str, required=True, help="Party name for output filename, or 'all' to process all parties.")
     parser.add_argument("--model_name", type=str, required=True, help="Path or name of 32B model.")
@@ -255,16 +260,19 @@ def main():
     # Setup
     os.makedirs(args.output_dir, exist_ok=True)
     
+    # Verify manifesto directory exists
+    if not os.path.isdir(args.manifesto_dir):
+        raise ValueError(f"Manifesto directory not found: {args.manifesto_dir}")
+    
     # Handle --party all
     if args.party.lower() == "all":
         print("[INFO] Processing all parties...")
-        manifesto_dir = "manifesto"
         
         # Find all manifest_*.csv files
-        manifest_files = sorted([f for f in os.listdir(manifesto_dir) if f.startswith("manifest_") and f.endswith(".csv")])
+        manifest_files = sorted([f for f in os.listdir(args.manifesto_dir) if f.startswith("manifest_") and f.endswith(".csv")])
         
         if not manifest_files:
-            raise ValueError(f"No manifest_*.csv files found in {manifesto_dir}")
+            raise ValueError(f"No manifest_*.csv files found in {args.manifesto_dir}")
         
         print(f"[INFO] Found {len(manifest_files)} manifesto files:")
         for f in manifest_files:
@@ -274,7 +282,7 @@ def main():
         for manifest_file in manifest_files:
             # Extract party name: manifest_GL.csv -> GL
             party_name = manifest_file.replace("manifest_", "").replace(".csv", "").upper()
-            manifesto_path = os.path.join(manifesto_dir, manifest_file)
+            manifesto_path = os.path.join(args.manifesto_dir, manifest_file)
             
             try:
                 normalize_single_party(
@@ -297,12 +305,15 @@ def main():
     
     else:
         # Single party mode
-        if args.manifesto_csv is None:
-            raise ValueError("--manifesto_csv is required when --party is not 'all'")
+        manifesto_file = f"manifest_{args.party.lower()}.csv"
+        manifesto_path = os.path.join(args.manifesto_dir, manifesto_file)
+        
+        if not os.path.exists(manifesto_path):
+            raise ValueError(f"Manifesto file not found: {manifesto_path}")
         
         normalize_single_party(
-            manifesto_csv=args.manifesto_csv,
-            party=args.party,
+            manifesto_csv=manifesto_path,
+            party=args.party.upper(),
             output_dir=args.output_dir,
             model_name=args.model_name,
             top_codes=args.top_codes,

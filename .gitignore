@@ -12,6 +12,7 @@ data/
 outputs/
 *.csv
 *.parquet
+manifesto/
 
 # Logs
 logs/

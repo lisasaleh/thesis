@@ -152,7 +152,6 @@ def main():
                 "--output_dir", args.summary_dir,
                 "--model_name", args.model_7b,
                 *(["--add_timestamp"] if args.add_timestamp else []),
-                *(["--resume"] if args.resume else []),
             ],
             "output": summary_output
         })
@@ -188,7 +187,6 @@ def main():
                 "--party", args.party,
                 "--model_name", args.model_32b,
                 *(["--add_timestamp"] if args.add_timestamp else []),
-                *(["--resume"] if args.resume else []),
             ],
             "output": None
         })

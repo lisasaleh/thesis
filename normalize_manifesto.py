@@ -194,10 +194,10 @@ def normalize_single_party(manifesto_csv: str, party: str, output_dir: str, mode
         
         try:
             response = llm.generate(
+                prompt=user_prompt,
                 system_prompt=MANIFESTO_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                max_tokens=500,
-                temperature=0.3
+                max_new_tokens=500,
+                temperature=0.0
             )
             
             # Parse response

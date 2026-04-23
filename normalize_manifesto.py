@@ -117,6 +117,7 @@ def parse_args():
     parser.add_argument("--text_col", type=str, default="text", help="Column name for manifesto text.")
     parser.add_argument("--code_col", type=str, default="cmp_code", help="Column name for CMP code.")
     parser.add_argument("--checkpoint_every", type=int, default=50, help="Checkpoint every N sentences.")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size for LLM processing (higher = faster but more VRAM).")
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint.")
     
     return parser.parse_args()
@@ -125,8 +126,9 @@ def parse_args():
 def normalize_single_party(manifesto_csv: str, party: str, output_dir: str, model_name: str, 
                           top_codes: int = 5, context_window: int = 4, 
                           text_col: str = "text", code_col: str = "cmp_code",
-                          checkpoint_every: int = 50, resume: bool = False):
-    """Normalize manifesto claims for a single party."""
+                          checkpoint_every: int = 50, resume: bool = False,
+                          batch_size: int = 8):
+    """Normalize manifesto claims for a single party using batch processing."""
     
     # Setup
     os.makedirs(output_dir, exist_ok=True)
@@ -173,8 +175,11 @@ def normalize_single_party(manifesto_csv: str, party: str, output_dir: str, mode
             processed_records = checkpoint.get("records", [])
         print(f"[INFO] Resuming from checkpoint: {start_idx}/{len(df_filtered)} processed")
     
-    # Normalize each sentence
-    print(f"[INFO] Starting normalization for party {party}...")
+    # Normalize each sentence using batch processing
+    print(f"[INFO] Starting normalization for party {party} (batch_size={batch_size})...")
+    
+    batch_prompts = []
+    batch_metadata = []
     
     for idx in tqdm(range(start_idx, len(df_filtered)), total=len(df_filtered) - start_idx, desc=party):
         row = df_filtered.iloc[idx]
@@ -189,50 +194,95 @@ def normalize_single_party(manifesto_csv: str, party: str, output_dir: str, mode
         # Get local context
         local_context = get_local_context(df_filtered, idx, context_window, text_col)
         
-        # Build and run normalization prompt
+        # Build normalization prompt
         user_prompt = build_manifesto_prompt(sentence, local_context, code)
         
-        try:
-            response = llm.generate(
-                prompt=user_prompt,
-                system_prompt=MANIFESTO_SYSTEM_PROMPT,
-                max_new_tokens=500,
-                temperature=0.0
-            )
-            
-            # Parse response
-            parsed = extract_json_with_basic_repair(response)
-            normalized_claim = parsed.get("normalized_claim", "").strip()
-            
-            # Validate
-            if not normalized_claim:
-                print(f"\n[WARN] Empty normalization for row {idx}: {sentence[:50]}...")
-                normalized_claim = sentence  # Fallback to original
-            
-        except Exception as e:
-            print(f"\n[ERROR] Failed to normalize row {idx}: {e}")
-            normalized_claim = sentence  # Fallback
-        
-        # Store result
-        record = {
+        batch_prompts.append(user_prompt)
+        batch_metadata.append({
             "original_sentence": sentence,
-            "normalized_sentence": normalized_claim,
             "cmp_code": code,
             "code_rank": code_to_rank.get(code, -1),
             "row_index": idx,
             "sentence_length": len(sentence),
-            "normalized_length": len(normalized_claim),
-        }
-        processed_records.append(record)
+        })
         
-        # Checkpoint every N sentences
-        if (idx - start_idx + 1) % checkpoint_every == 0:
-            with open(checkpoint_file, 'w') as f:
-                json.dump({
-                    "processed_count": idx + 1,
-                    "records": processed_records,
-                    "timestamp": datetime.now().isoformat()
-                }, f)
+        # Process batch when full
+        if len(batch_prompts) == batch_size or idx == len(df_filtered) - 1:
+            if batch_prompts:
+                try:
+                    responses = llm.batch_generate(
+                        prompts=batch_prompts,
+                        system_prompt=MANIFESTO_SYSTEM_PROMPT,
+                        max_new_tokens=500,
+                        temperature=0.0
+                    )
+                    
+                    # Parse all responses
+                    for response, metadata in zip(responses, batch_metadata):
+                        try:
+                            parsed = extract_json_with_basic_repair(response)
+                            normalized_claim = parsed.get("normalized_claim", "").strip()
+                            
+                            if not normalized_claim:
+                                print(f"\n[WARN] Empty normalization for row {metadata['row_index']}: {metadata['original_sentence'][:50]}...")
+                                normalized_claim = metadata['original_sentence']
+                        except Exception as e:
+                            print(f"\n[ERROR] Failed to parse row {metadata['row_index']}: {e}")
+                            normalized_claim = metadata['original_sentence']
+                        
+                        # Store result
+                        record = {
+                            "original_sentence": metadata['original_sentence'],
+                            "normalized_sentence": normalized_claim,
+                            "cmp_code": metadata['cmp_code'],
+                            "code_rank": metadata['code_rank'],
+                            "row_index": metadata['row_index'],
+                            "sentence_length": metadata['sentence_length'],
+                            "normalized_length": len(normalized_claim),
+                        }
+                        processed_records.append(record)
+                
+                except Exception as e:
+                    print(f"\n[ERROR] Batch processing failed: {e}")
+                    # Fallback: process individually
+                    for user_prompt, metadata in zip(batch_prompts, batch_metadata):
+                        try:
+                            response = llm.generate(
+                                prompt=user_prompt,
+                                system_prompt=MANIFESTO_SYSTEM_PROMPT,
+                                max_new_tokens=500,
+                                temperature=0.0
+                            )
+                            parsed = extract_json_with_basic_repair(response)
+                            normalized_claim = parsed.get("normalized_claim", "").strip()
+                            if not normalized_claim:
+                                normalized_claim = metadata['original_sentence']
+                        except Exception as parse_err:
+                            print(f"\n[ERROR] Fallback failed for row {metadata['row_index']}: {parse_err}")
+                            normalized_claim = metadata['original_sentence']
+                        
+                        record = {
+                            "original_sentence": metadata['original_sentence'],
+                            "normalized_sentence": normalized_claim,
+                            "cmp_code": metadata['cmp_code'],
+                            "code_rank": metadata['code_rank'],
+                            "row_index": metadata['row_index'],
+                            "sentence_length": metadata['sentence_length'],
+                            "normalized_length": len(normalized_claim),
+                        }
+                        processed_records.append(record)
+            
+            batch_prompts = []
+            batch_metadata = []
+            
+            # Checkpoint every N sentences
+            if len(processed_records) > start_idx and (len(processed_records) - start_idx) % checkpoint_every == 0:
+                with open(checkpoint_file, 'w') as f:
+                    json.dump({
+                        "processed_count": len(processed_records),
+                        "records": processed_records,
+                        "timestamp": datetime.now().isoformat()
+                    }, f)
     
     # Save final output
     out_df = pd.DataFrame(processed_records)
@@ -295,6 +345,7 @@ def main():
                     text_col=args.text_col,
                     code_col=args.code_col,
                     checkpoint_every=args.checkpoint_every,
+                    batch_size=args.batch_size,
                     resume=args.resume
                 )
             except Exception as e:
@@ -321,6 +372,7 @@ def main():
             text_col=args.text_col,
             code_col=args.code_col,
             checkpoint_every=args.checkpoint_every,
+            batch_size=args.batch_size,
             resume=args.resume
         )
 

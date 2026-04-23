@@ -1,0 +1,40 @@
+#!/bin/bash
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=norm_manifest_batch
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=9
+#SBATCH --time=04:00:00
+#SBATCH --array=0-10
+#SBATCH --output=slurm_output/norm_manifest_batch_%A_%a.out
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+source activate thesis
+
+# Array of party names
+PARTIES=("50PLUS" "CDA" "CU" "D66" "GL" "PVDA" "PVDD" "PVV" "SGP" "SP" "VVD")
+
+# Get the party for this array task
+PARTY=${PARTIES[$SLURM_ARRAY_TASK_ID]}
+
+echo "=========================================="
+echo "Task ID: $SLURM_ARRAY_TASK_ID"
+echo "Processing Party: $PARTY"
+echo "=========================================="
+
+srun python normalize_manifesto.py \
+  --manifesto_dir manifesto \
+  --output_dir outputs/manifesto \
+  --party "$PARTY" \
+  --model_name /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
+  --top_codes 5 \
+  --batch_size 8 \
+  --checkpoint_every 50 \
+  --resume
+
+echo "=========================================="
+echo "Task ID: $SLURM_ARRAY_TASK_ID completed"
+echo "=========================================="

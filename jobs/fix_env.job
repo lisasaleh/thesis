@@ -1,22 +1,21 @@
-    #!/bin/bash
-    #SBATCH --partition=gpu_mig
-    #SBATCH --gpus=1
-    #SBATCH --job-name=fixTorch
-    #SBATCH --ntasks=1
-    #SBATCH --cpus-per-task=4
-    #SBATCH --time=00:10:00
-    #SBATCH --output=slurm_output/fix_torch_%A.out
+#!/bin/bash
+#SBATCH --job-name=conda_env
+#SBATCH --output=logs/conda_env.out
+#SBATCH --error=logs/conda_env.err
+#SBATCH --time=01:00:00
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
 
-    module purge
-    module load 2025
-    module load Anaconda3/2025.06-1
+module load 2025
+module load Anaconda3/2025.06-1
 
-    source activate thesis
+source $(conda info --base)/etc/profile.d/conda.sh
 
-    python --version
-    python -c "import torch; print('before torch:', torch.__version__)"
+export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
+export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
+export TRANSFORMERS_CACHE=$HF_HOME
+export HF_DATASETS_CACHE=$HF_HOME
 
-    python -m pip install --upgrade pip
-    python -m pip install --upgrade "torch>=2.4,<2.6"
+cd ~/thesis
 
-    python -c "import torch; print('after torch:', torch.__version__)"
+conda env create -f env.yml

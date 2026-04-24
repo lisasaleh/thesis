@@ -5,11 +5,24 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 
+#!/bin/bash
+#SBATCH --job-name=conda_env
+#SBATCH --output=slurm_output/fix_env_%A.out
+#SBATCH --error=slurm_output/fix_env_%A.err
+#SBATCH --time=01:00:00
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+
 set -euo pipefail
 
+module purge
 module load 2025
 module load Anaconda3/2025.06-1
-source "$(conda info --base)/etc/profile.d/conda.sh"
+
+# Explicitly define conda base
+CONDA_BASE=/sw/arch/RHEL9/EB_production/2025/software/Anaconda3/2025.06-1
+
+source "$CONDA_BASE/etc/profile.d/conda.sh"
 
 conda activate /scratch-shared/lsaleh/.conda/envs/thesis
 

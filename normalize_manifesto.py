@@ -213,7 +213,7 @@ def normalize_single_party(manifesto_csv: str, party: str, output_dir: str, mode
                     responses = llm.batch_generate(
                         prompts=batch_prompts,
                         system_prompt=MANIFESTO_SYSTEM_PROMPT,
-                        max_new_tokens=500,
+                        max_new_tokens=64,
                         temperature=0.0
                     )
                     
@@ -250,7 +250,7 @@ def normalize_single_party(manifesto_csv: str, party: str, output_dir: str, mode
                             response = llm.generate(
                                 prompt=user_prompt,
                                 system_prompt=MANIFESTO_SYSTEM_PROMPT,
-                                max_new_tokens=500,
+                                max_new_tokens=64,
                                 temperature=0.0
                             )
                             parsed = extract_json_with_basic_repair(response)

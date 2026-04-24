@@ -1,21 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=conda_env
-#SBATCH --output=logs/conda_env.out
-#SBATCH --error=logs/conda_env.err
+#SBATCH --output=slurm_output/fix_env_%A.out
 #SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 
+set -euo pipefail
+
 module load 2025
 module load Anaconda3/2025.06-1
+source "$(conda info --base)/etc/profile.d/conda.sh"
 
-source $(conda info --base)/etc/profile.d/conda.sh
+conda activate /scratch-shared/lsaleh/.conda/envs/thesis
 
-export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
-export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
-export TRANSFORMERS_CACHE=$HF_HOME
-export HF_DATASETS_CACHE=$HF_HOME
+conda install -y -c pytorch -c nvidia pytorch=2.4.* pytorch-cuda=12.1
 
-cd ~/thesis
-
-conda env create -f env.yml
+python -c "import torch, transformers; print(torch.__version__); print(torch.cuda.is_available())"

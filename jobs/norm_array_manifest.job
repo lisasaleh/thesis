@@ -7,7 +7,6 @@
 #SBATCH --time=04:00:00
 #SBATCH --array=0-10
 #SBATCH --output=slurm_output/norm_manifest_batch_%A_%a.out
-#SBATCH --error=slurm_output/norm_manifest_batch_%A_%a.err
 
 set -euo pipefail
 
@@ -22,6 +21,9 @@ export TRANSFORMERS_CACHE="$HF_HOME"
 export HF_DATASETS_CACHE="$HF_HOME"
 
 conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+
+python -c "import torch, transformers; print(torch.__version__); print(torch.cuda.is_available())"
+python -c "from transformers import AutoModelForCausalLM; print('transformers torch backend ok')"
 
 cd ~/thesis
 

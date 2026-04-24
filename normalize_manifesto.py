@@ -20,6 +20,8 @@ import os
 import json
 import argparse
 import re
+import sys
+import traceback
 from datetime import datetime
 
 import pandas as pd
@@ -210,13 +212,14 @@ def normalize_single_party(manifesto_csv: str, party: str, output_dir: str, mode
         if len(batch_prompts) == batch_size or idx == len(df_filtered) - 1:
             if batch_prompts:
                 try:
+                    print(f"[DEBUG] Attempting batch processing with {len(batch_prompts)} prompts", file=sys.stderr, flush=True)
                     responses = llm.batch_generate(
                         prompts=batch_prompts,
                         system_prompt=MANIFESTO_SYSTEM_PROMPT,
                         max_new_tokens=64,
                         temperature=0.0
                     )
-                    
+                    print(f"[DEBUG] Batch processing succeeded", file=sys.stderr, flush=True)
                     # Parse all responses
                     for response, metadata in zip(responses, batch_metadata):
                         try:
@@ -243,7 +246,9 @@ def normalize_single_party(manifesto_csv: str, party: str, output_dir: str, mode
                         processed_records.append(record)
                 
                 except Exception as e:
-                    print(f"\n[ERROR] Batch processing failed: {e}")
+                    print(f"\n[ERROR] Batch processing failed: {e}", file=sys.stderr, flush=True)
+                    traceback.print_exc(file=sys.stderr)
+                    print(f"[DEBUG] Falling back to sequential processing", file=sys.stderr, flush=True)
                     # Fallback: process individually
                     for user_prompt, metadata in zip(batch_prompts, batch_metadata):
                         try:

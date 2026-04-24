@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=04:00:00
-#SBATCH --array=0-10
+#SBATCH --array=4
 #SBATCH --output=slurm_output/norm_manifest_batch_%A_%a.out
 
 set -euo pipefail

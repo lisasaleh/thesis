@@ -8,26 +8,15 @@
 set -euo pipefail
 
 module purge
-unset PYTHONPATH
-unset PYTHONHOME
-unset CONDA_PREFIX
-unset CONDA_DEFAULT_ENV
-unset CONDA_SHLVL
-
 module load 2025
 module load Anaconda3/2025.06-1
 
 CONDA_BASE=/sw/arch/RHEL9/EB_production/2025/software/Anaconda3/2025.06-1
-source "$CONDA_BASE/etc/profile.d/conda.sh"
+ENV_PATH=/scratch-shared/lsaleh/.conda/envs/thesis
 
-export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
+"$CONDA_BASE/bin/python" -m conda install -y \
+  -p "$ENV_PATH" \
+  -c pytorch -c nvidia \
+  pytorch=2.4.* pytorch-cuda=12.1
 
-conda activate /scratch-shared/lsaleh/.conda/envs/thesis
-
-which python
-python -c "import sys; print(sys.executable)"
-python -c "import torch; print(torch.__version__)"
-
-conda install -y -c pytorch -c nvidia pytorch=2.4.* pytorch-cuda=12.1
-
-python -c "import torch, transformers; print(torch.__version__); print(torch.cuda.is_available())"
+"$ENV_PATH/bin/python" -c "import torch, transformers; print(torch.__version__); print(torch.cuda.is_available())"

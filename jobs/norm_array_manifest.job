@@ -7,12 +7,23 @@
 #SBATCH --time=04:00:00
 #SBATCH --array=0-10
 #SBATCH --output=slurm_output/norm_manifest_batch_%A_%a.out
+#SBATCH --error=slurm_output/norm_manifest_batch_%A_%a.err
 
-module purge
+set -euo pipefail
+
 module load 2025
 module load Anaconda3/2025.06-1
+source "$(conda info --base)/etc/profile.d/conda.sh"
 
-source activate thesis
+export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
+
+export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
+export TRANSFORMERS_CACHE="$HF_HOME"
+export HF_DATASETS_CACHE="$HF_HOME"
+
+conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+
+cd ~/thesis
 
 # Array of party names
 PARTIES=("50PLUS" "CDA" "CU" "D66" "GL" "PVDA" "PVDD" "PVV" "SGP" "SP" "VVD")

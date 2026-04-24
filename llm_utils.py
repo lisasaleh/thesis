@@ -57,6 +57,8 @@ class LocalLLM:
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        
+        self.tokenizer.padding_side = 'left'  # Required for decoder-only models with batched generation
 
         print("[DEBUG] Model + tokenizer ready", file=sys.stderr, flush=True)
 
@@ -146,6 +148,8 @@ class LocalLLM:
         input_device = next(self.model.parameters()).device
         model_inputs = {k: v.to(input_device) for k, v in model_inputs.items()}
         
+        # With left-padding, we need to track where each prompt actually starts and ends
+        # to properly extract only the generated tokens (not padding or input)
         input_lens = (model_inputs["input_ids"] != self.tokenizer.pad_token_id).sum(dim=1)
         
         print(
@@ -165,8 +169,20 @@ class LocalLLM:
             )
         
         results = []
-        for i, input_len in enumerate(input_lens):
-            generated_ids = output_ids[i][input_len:]
+        for i in range(len(prompts)):
+            # Find where the actual prompt ends (accounting for left-padding)
+            # First, find where first non-padding token starts
+            first_real_idx = (model_inputs["input_ids"][i] != self.tokenizer.pad_token_id).nonzero(as_tuple=True)[0]
+            if len(first_real_idx) > 0:
+                start_idx = first_real_idx[0].item()
+                # Prompt ends at: where it started + its length
+                end_idx = start_idx + input_lens[i].item()
+            else:
+                # Fallback if all padding (shouldn't happen)
+                end_idx = input_lens[i].item()
+            
+            # Extract only the generated portion
+            generated_ids = output_ids[i][end_idx:]
             text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
             results.append(text.strip())
         

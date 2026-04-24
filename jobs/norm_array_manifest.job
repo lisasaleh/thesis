@@ -37,7 +37,7 @@ echo "Processing Party: $PARTY"
 echo "=========================================="
 
 srun python normalize_manifesto.py \
-  --manifesto_dir manifesto \
+  --manifesto_dir data/manifesto \
   --output_dir outputs/manifesto \
   --party "$PARTY" \
   --model_name /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \

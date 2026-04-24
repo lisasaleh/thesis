@@ -113,13 +113,65 @@ class LocalLLM:
         print("[DEBUG] Generation finished", file=sys.stderr, flush=True)
         return text.strip()
 
-    def generate(
+    def batch_generate(
         self,
-        prompt: str,
+        prompts: list,
         system_prompt: str = None,
         max_new_tokens: int = 512,
         temperature: float = 0.0
-    ) -> str:
+    ) -> list:
+        """Process multiple prompts in a batch for efficiency."""
+        messages_list = []
+        
+        for prompt in prompts:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            messages_list.append(messages)
+        
+        # Tokenize all prompts
+        texts = [
+            self.tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+            for msgs in messages_list
+        ]
+        
+        print(
+            f"[DEBUG] Batch tokenization start | batch_size={len(prompts)} | avg_chars={sum(len(p) for p in prompts) // len(prompts)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        
+        model_inputs = self.tokenizer(texts, return_tensors="pt", padding=True)
+        input_device = next(self.model.parameters()).device
+        model_inputs = {k: v.to(input_device) for k, v in model_inputs.items()}
+        
+        input_lens = (model_inputs["input_ids"] != self.tokenizer.pad_token_id).sum(dim=1)
+        
+        print(
+            f"[DEBUG] Batch generation start | batch_size={len(prompts)} | avg_input_tokens={input_lens.float().mean():.0f}",
+            file=sys.stderr,
+            flush=True,
+        )
+        
+        with torch.no_grad():
+            output_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=(temperature > 0),
+                temperature=temperature if temperature > 0 else None,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+        
+        results = []
+        for i, input_len in enumerate(input_lens):
+            generated_ids = output_ids[i][input_len:]
+            text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+            results.append(text.strip())
+        
+        print("[DEBUG] Batch generation finished", file=sys.stderr, flush=True)
+        return results
         messages = []
 
         if system_prompt:

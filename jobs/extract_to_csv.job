@@ -15,5 +15,5 @@ conda activate /scratch-shared/lsaleh/.conda/envs/thesis
 conda install requests
 
 srun python extract_to_csv.py \
-  --input data \
+  --input data/raw_debates \
   --output outputs/debates.csv

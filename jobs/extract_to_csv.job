@@ -1,0 +1,19 @@
+#!/bin/bash
+#SBATCH --partition=rome
+#SBATCH --job-name=extract_to_csv
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm_output/extract_to_csv_%A.out
+
+module load 2025
+module load Anaconda3/2025.06-1
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+
+conda install requests
+
+srun python extract_to_csv.py \
+  --input data \
+  --output outputs/debates.csv

@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=cmp_theme_mapper
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=12
+#SBATCH --time=12:00:00
+#SBATCH --output=slurm_output/cmp_theme_mapper_%A.out
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+
+
+srun python cmp_theme_mapper.py \
+  --themes outputs/themes.csv \
+  --cmp outputs/CMP_codebook.csv \
+  --model /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
+  --output output/mapping_cmp \
+  --start 0 \
+  --end 10 \
+  --batch-size 8
+
+echo "CMP-Theme Mapper completed"

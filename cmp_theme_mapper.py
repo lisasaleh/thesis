@@ -129,16 +129,16 @@ INSTRUCTIONS:
 - Only select from the provided theme list
 - Return ONLY valid JSON, no markdown or prose
 
-CMP Code: {cmp_code['cmp_code']}
-CMP Title: {cmp_code.get('cmp_title', 'N/A')}
-CMP Description: {cmp_code.get('cmp_description', '')}
+CMP Code: {cmp_code['code']}
+CMP Title: {cmp_code.get('title', 'N/A')}
+CMP Description: {cmp_code.get('description_md', '')}
 
 Available main themes:
 {main_themes_list}
 
 Respond with ONLY this JSON structure (no markdown, no extra text):
 {{
-    "cmp_code": "{cmp_code['cmp_code']}",
+    "cmp_code": "{cmp_code['code']}",
     "selected_main_themes": ["Theme1", "Theme2"],
     "reasoning": "Brief explanation of selection"
 }}"""
@@ -151,7 +151,7 @@ Respond with ONLY this JSON structure (no markdown, no extra text):
         result = self._extract_json(response)
         
         return {
-            'cmp_code': cmp_code['cmp_code'],
+            'cmp_code': cmp_code['code'],
             'raw_response': response,
             'parsed_response': result,
             'timestamp': datetime.now().isoformat(),
@@ -169,7 +169,7 @@ Respond with ONLY this JSON structure (no markdown, no extra text):
         for cmp_code, selected_main_themes in cmp_codes_with_themes:
             # Check if any selected main themes have subthemes
             if not self._has_subthemes(selected_main_themes):
-                no_subthemes_codes.append(cmp_code['cmp_code'])
+                no_subthemes_codes.append(cmp_code['code'])
                 continue
             
             # Build subtheme list from precomputed strings (no looping needed!)
@@ -189,16 +189,16 @@ INSTRUCTIONS:
 - This is a recall-oriented classification
 - Return ONLY valid JSON, no markdown or prose
 
-CMP Code: {cmp_code['cmp_code']}
-CMP Title: {cmp_code.get('cmp_title', 'N/A')}
-CMP Description: {cmp_code.get('cmp_description', '')}
+CMP Code: {cmp_code['code']}
+CMP Title: {cmp_code.get('title', 'N/A')}
+CMP Description: {cmp_code.get('description_md', '')}
 
 Available sub-themes (in selected main themes):
 {subthemes_str}
 
 Respond with ONLY this JSON structure (no markdown, no extra text):
 {{
-    "cmp_code": "{cmp_code['cmp_code']}",
+    "cmp_code": "{cmp_code['code']}",
     "selected_subthemes": [
         {{"main_theme": "Theme1", "sub_theme": "SubTheme1", "id": "theme_XXXX"}},
         {{"main_theme": "Theme2", "sub_theme": "SubTheme2", "id": "theme_YYYY"}}
@@ -206,7 +206,7 @@ Respond with ONLY this JSON structure (no markdown, no extra text):
     "reasoning": "Brief explanation"
 }}"""
             prompts.append(prompt)
-            code_info.append(cmp_code['cmp_code'])
+            code_info.append(cmp_code['code'])
         
         return prompts, code_info, no_subthemes_codes
     
@@ -248,7 +248,7 @@ Respond with ONLY this JSON structure (no markdown, no extra text):
             for code, response in zip(batch_codes, responses):
                 result = self._extract_json(response)
                 main_result = {
-                    'cmp_code': code['cmp_code'],
+                    'cmp_code': code['code'],
                     'raw_response': response,
                     'parsed_response': result,
                     'timestamp': datetime.now().isoformat(),
@@ -256,7 +256,7 @@ Respond with ONLY this JSON structure (no markdown, no extra text):
                     'model': self.model_name,
                     'stage': 'main_themes'
                 }
-                main_results_dict[code['cmp_code']] = main_result
+                main_results_dict[code['code']] = main_result
                 
                 # Track codes with valid main themes for pass 2
                 if result and result.get('selected_main_themes'):
@@ -282,9 +282,9 @@ Respond with ONLY this JSON structure (no markdown, no extra text):
                 main_result = main_results_dict[code_id]
                 main_themes = main_result['parsed_response'].get('selected_main_themes', [])
                 
-                cmp_code_obj = next((c for c, _ in batch_items if c['cmp_code'] == code_id), {})
-                cmp_title = cmp_code_obj.get('cmp_title', '')
-                cmp_desc = cmp_code_obj.get('cmp_description', '')
+                cmp_code_obj = next((c for c, _ in batch_items if c['code'] == code_id), {})
+                cmp_title = cmp_code_obj.get('title', '')
+                cmp_desc = cmp_code_obj.get('description_md', '')
                 mapping = {
                     'cmp_code': code_id,
                     'cmp_title': cmp_title,
@@ -321,11 +321,11 @@ Respond with ONLY this JSON structure (no markdown, no extra text):
                 main_themes = main_result['parsed_response'].get('selected_main_themes', [])
                 
                 # Combine results
-                cmp_code_obj = next((c for c, _ in batch_items if c['cmp_code'] == code_id), {})
+                cmp_code_obj = next((c for c, _ in batch_items if c['code'] == code_id), {})
                 mapping = {
                     'cmp_code': code_id,
-                    'cmp_title': cmp_code_obj.get('cmp_title', ''),
-                    'cmp_description': cmp_code_obj.get('cmp_description', ''),
+                    'cmp_title': cmp_code_obj.get('title', ''),
+                    'cmp_description': cmp_code_obj.get('description_md', ''),
                     'main_themes_stage': main_result,
                     'subthemes_stage': sub_result,
                     'final_mapping': {
@@ -342,13 +342,13 @@ Respond with ONLY this JSON structure (no markdown, no extra text):
         unmatched_count = 0
         
         for cmp_code in codes_to_process:
-            if cmp_code['cmp_code'] not in processed_codes:
+            if cmp_code['code'] not in processed_codes:
                 # Code did not map to any main theme
-                main_result = main_results_dict.get(cmp_code['cmp_code'])
+                main_result = main_results_dict.get(cmp_code['code'])
                 mapping = {
-                    'cmp_code': cmp_code['cmp_code'],
-                    'cmp_title': cmp_code.get('cmp_title', ''),
-                    'cmp_description': cmp_code.get('cmp_description', ''),
+                    'cmp_code': cmp_code['code'],
+                    'cmp_title': cmp_code.get('title', ''),
+                    'cmp_description': cmp_code.get('description_md', ''),
                     'main_themes_stage': main_result,
                     'subthemes_stage': None,
                     'final_mapping': {

@@ -261,6 +261,7 @@ def main():
     processed_count = 0
     total_interventions = 0
     debug_done = False
+    found_docs = set()
 
     for year_folder in sorted(data_dir.iterdir()):
         if not year_folder.is_dir():
@@ -293,6 +294,8 @@ def main():
 
             if document_id not in valid_docs:
                 continue
+            
+            found_docs.add(document_id)
 
             interventions_list = []
             intervention_counter = {"count": 0}
@@ -311,9 +314,9 @@ def main():
                 debug_done = True
 
             if interventions_list:
-                df = pd.DataFrame(interventions_list)
-                output_path = year_output_dir / f"{document_id}.csv"
-                df.to_csv(output_path, index=False)
+                #df = pd.DataFrame(interventions_list)
+                #output_path = year_output_dir / f"{document_id}.csv"
+                #df.to_csv(output_path, index=False)
 
                 year_processed += 1
                 year_interventions += len(interventions_list)
@@ -330,6 +333,23 @@ def main():
     print(f"Total documents processed: {processed_count}")
     print(f"Total interventions extracted: {total_interventions}")
     print(f"Output directory: {output_dir}")
+    
+    # Report on missing documents
+    missing_docs = valid_docs - found_docs
+    if missing_docs:
+        print(f"\n{'=' * 50}")
+        print(f"WARNING: {len(missing_docs)} valid documents not found in data/")
+        print(f"Found {len(found_docs)}/{len(valid_docs)} valid documents ({100*len(found_docs)/len(valid_docs):.1f}%)")
+        
+        # Save missing documents to file for reference
+        missing_file = output_dir / "missing_documents.txt"
+        with open(missing_file, 'w') as f:
+            f.write(f"Missing {len(missing_docs)} documents:\n\n")
+            for doc_id in sorted(missing_docs):
+                f.write(f"{doc_id}\n")
+        print(f"Missing document list saved to: {missing_file}")
+    else:
+        print(f"\nAll valid documents found and processed!")
 
 
 if __name__ == "__main__":

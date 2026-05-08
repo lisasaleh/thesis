@@ -58,24 +58,20 @@ def load_json_document(json_path: str) -> Dict:
 
 
 def extract_text_from_json(doc: Dict) -> str:
-    """Extract and clean text from JSON document by joining all pages."""
     all_text = []
-    
-    # Extract text from all pages in foi_files
-    foi_files = doc.get("foi_files", [])
-    
-    for file_obj in foi_files:
+
+    for file_obj in doc.get("foi_files", []):
         foi_pages = file_obj.get("foi_pages", [])
-        
-        # Sort pages by page number to maintain order
-        foi_pages_sorted = sorted(foi_pages, key=lambda p: p.get("foi_pageNumber", 0))
-        
+        foi_pages_sorted = sorted(
+            foi_pages,
+            key=lambda p: p.get("foi_pageNumber", 0),
+        )
+
         for page in foi_pages_sorted:
             page_text = page.get("foi_bodyText")
             if page_text:
                 all_text.append(clean_page_text(page_text))
-    
-    # Join all pages with space
+
     full_text = " ".join(all_text)
     return re.sub(r"\s+", " ", full_text).strip()
 
@@ -135,7 +131,6 @@ def load_relevant_themes(manifest_path: str) -> Set[str]:
     df = pd.read_csv(manifest_path)
 
     themes = set()
-
     for theme_str in df["all_theme_ids"].dropna():
         theme_ids = [t.strip() for t in str(theme_str).split(";;")]
         themes.update(theme_ids)
@@ -145,13 +140,11 @@ def load_relevant_themes(manifest_path: str) -> Set[str]:
 
 def load_valid_documents(debates_path: str, relevant_themes: Set[str]) -> Set[str]:
     df = pd.read_csv(debates_path)
-
     df = df[df["day_count"] != -1]
 
     def has_relevant_theme(theme_str):
         if pd.isna(theme_str):
             return False
-
         themes = [t.strip() for t in str(theme_str).split(";;")]
         return any(t in relevant_themes for t in themes)
 
@@ -172,26 +165,47 @@ def process_document(
     interventions_list: List[Dict],
     intervention_counter: Dict,
     debug: bool = False,
-) -> None:
+) -> Dict:
+    result = {
+        "status": "ok",
+        "reason": "",
+        "n_words": 0,
+        "speaker_matches": 0,
+        "n_interventions": 0,
+    }
+
     try:
         doc = load_json_document(json_path)
         text = extract_text_from_json(doc)
 
+        result["n_words"] = len(text.split())
+
         if debug:
             print(f"\nDEBUG document: {document_id}")
             print("JSON keys:", list(doc.keys()))
-            print("Extracted text words:", len(text.split()))
+            print("Extracted text words:", result["n_words"])
             print("Extracted text sample:")
             print(text[:1000])
 
-        if not text or len(text.split()) < 10:
-            return
+        if not text or result["n_words"] < 10:
+            result["status"] = "skipped"
+            result["reason"] = "empty_or_short_text"
+            return result
+
+        speaker_matches = list(SPEAKER_PATTERN.finditer(text))
+        result["speaker_matches"] = len(speaker_matches)
 
         interventions = split_interventions(text)
+        result["n_interventions"] = len(interventions)
 
         if debug:
-            print("Speaker matches:", len(list(SPEAKER_PATTERN.finditer(text))))
-            print("Interventions extracted:", len(interventions))
+            print("Speaker matches:", result["speaker_matches"])
+            print("Interventions extracted:", result["n_interventions"])
+
+        if not interventions:
+            result["status"] = "skipped"
+            result["reason"] = "no_interventions_extracted"
+            return result
 
         for interv in interventions:
             intervention_counter["count"] += 1
@@ -206,8 +220,20 @@ def process_document(
                 "n_words": len(interv["speech"].split()),
             })
 
+        return result
+
     except Exception as e:
+        result["status"] = "error"
+        result["reason"] = str(e)
         print(f"Error processing {json_path}: {e}")
+        return result
+
+
+def write_doc_list(path: Path, docs: Set[str], title: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"{title}: {len(docs)} documents\n\n")
+        for doc_id in sorted(docs):
+            f.write(f"{doc_id}\n")
 
 
 def main():
@@ -215,30 +241,15 @@ def main():
         description="Preprocess debates into intervention-level CSVs"
     )
 
+    parser.add_argument("--output_dir", type=str, default="/scratch-shared/lsaleh/debates")
+    parser.add_argument("--manifest", type=str, default="outputs/cmp_manifest.csv")
+    parser.add_argument("--debates", type=str, default="outputs/debates.csv")
+    parser.add_argument("--data_dir", type=str, default="data")
+    parser.add_argument("--debug", action="store_true")
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="/scratch-shared/lsaleh/debates",
-    )
-    parser.add_argument(
-        "--manifest",
-        type=str,
-        default="outputs/cmp_manifest.csv",
-    )
-    parser.add_argument(
-        "--debates",
-        type=str,
-        default="outputs/debates.csv",
-    )
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        default="data",
-    )
-    parser.add_argument(
-        "--debug",
+        "--save_csvs",
         action="store_true",
-        help="Print debug information for the first matching document.",
+        help="Actually save intervention CSVs. By default, only diagnostics are written.",
     )
 
     args = parser.parse_args()
@@ -251,9 +262,6 @@ def main():
     valid_docs = load_valid_documents(args.debates, relevant_themes)
     print(f"Found {len(valid_docs)} valid documents (day_count != -1, relevant themes)")
 
-    print("Sample valid_docs:")
-    print(list(valid_docs)[:10])
-
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -261,7 +269,13 @@ def main():
     processed_count = 0
     total_interventions = 0
     debug_done = False
+
     found_docs = set()
+    processed_docs = set()
+    unprocessed_docs = set()
+    error_docs = set()
+
+    skip_records = []
 
     for year_folder in sorted(data_dir.iterdir()):
         if not year_folder.is_dir():
@@ -274,7 +288,6 @@ def main():
         print(f"\nProcessing year {year}...")
 
         json_files = sorted(year_folder.glob("*.json"))
-
         if not json_files:
             print(f"  No JSON files found in {year_folder}")
             continue
@@ -294,15 +307,14 @@ def main():
 
             if document_id not in valid_docs:
                 continue
-            
+
             found_docs.add(document_id)
 
             interventions_list = []
             intervention_counter = {"count": 0}
-
             run_debug = args.debug and not debug_done
 
-            process_document(
+            result = process_document(
                 str(json_path),
                 document_id,
                 interventions_list,
@@ -314,42 +326,78 @@ def main():
                 debug_done = True
 
             if interventions_list:
-                #df = pd.DataFrame(interventions_list)
-                #output_path = year_output_dir / f"{document_id}.csv"
-                #df.to_csv(output_path, index=False)
+                processed_docs.add(document_id)
+
+                if args.save_csvs:
+                    df = pd.DataFrame(interventions_list)
+                    output_path = year_output_dir / f"{document_id}.csv"
+                    df.to_csv(output_path, index=False)
 
                 year_processed += 1
                 year_interventions += len(interventions_list)
                 total_interventions += len(interventions_list)
                 processed_count += 1
+            else:
+                unprocessed_docs.add(document_id)
+
+                if result["status"] == "error":
+                    error_docs.add(document_id)
+
+                skip_records.append({
+                    "document_id": document_id,
+                    "year": year,
+                    "reason": result["reason"],
+                    "n_words": result["n_words"],
+                    "speaker_matches": result["speaker_matches"],
+                    "n_interventions": result["n_interventions"],
+                })
 
         print(
             f"  Processed {year_processed} documents "
             f"with {year_interventions} total interventions"
         )
 
+    missing_docs = valid_docs - found_docs
+
     print(f"\n{'=' * 50}")
     print("Processing complete!")
-    print(f"Total documents processed: {processed_count}")
+    print(f"Valid documents: {len(valid_docs)}")
+    print(f"Found in data folders: {len(found_docs)}")
+    print(f"Processed with interventions: {len(processed_docs)}")
+    print(f"Found but no interventions extracted: {len(unprocessed_docs)}")
+    print(f"Not found in data folders: {len(missing_docs)}")
+    print(f"Errors: {len(error_docs)}")
     print(f"Total interventions extracted: {total_interventions}")
     print(f"Output directory: {output_dir}")
-    
-    # Report on missing documents
-    missing_docs = valid_docs - found_docs
-    if missing_docs:
-        print(f"\n{'=' * 50}")
-        print(f"WARNING: {len(missing_docs)} valid documents not found in data/")
-        print(f"Found {len(found_docs)}/{len(valid_docs)} valid documents ({100*len(found_docs)/len(valid_docs):.1f}%)")
-        
-        # Save missing documents to file for reference
-        missing_file = output_dir / "missing_documents.txt"
-        with open(missing_file, 'w') as f:
-            f.write(f"Missing {len(missing_docs)} documents:\n\n")
-            for doc_id in sorted(missing_docs):
-                f.write(f"{doc_id}\n")
-        print(f"Missing document list saved to: {missing_file}")
-    else:
-        print(f"\nAll valid documents found and processed!")
+    print(f"CSV saving enabled: {args.save_csvs}")
+
+    write_doc_list(
+        output_dir / "missing_documents.txt",
+        missing_docs,
+        "Valid documents not found in data folders",
+    )
+
+    write_doc_list(
+        output_dir / "unprocessed_documents.txt",
+        unprocessed_docs,
+        "Valid documents found but no interventions extracted",
+    )
+
+    write_doc_list(
+        output_dir / "processed_documents.txt",
+        processed_docs,
+        "Valid documents processed with interventions",
+    )
+
+    if skip_records:
+        skip_df = pd.DataFrame(skip_records)
+        skip_path = output_dir / "unprocessed_documents_diagnostics.csv"
+        skip_df.to_csv(skip_path, index=False)
+        print(f"Unprocessed diagnostics saved to: {skip_path}")
+
+    print(f"Missing document list saved to: {output_dir / 'missing_documents.txt'}")
+    print(f"Unprocessed document list saved to: {output_dir / 'unprocessed_documents.txt'}")
+    print(f"Processed document list saved to: {output_dir / 'processed_documents.txt'}")
 
 
 if __name__ == "__main__":

@@ -174,7 +174,8 @@ def load_valid_documents(debates_path: str, relevant_themes: Set[str]) -> Set[st
     
     valid_df = df[df['theme_id'].apply(has_relevant_theme)]
     
-    return set(valid_df['dc_externalIdentifier'].unique())
+    # Use dc_identifier (matches JSON filenames) instead of dc_externalIdentifier
+    return set(valid_df['dc_identifier'].unique())
 
 
 def process_document(json_path: str, document_id: str, 

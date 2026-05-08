@@ -1,0 +1,17 @@
+#!/bin/bash
+#SBATCH --partition=rome
+#SBATCH --job-name=pp_debates
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm_output/pp_debates_%A.out
+
+module load 2025
+module load Anaconda3/2025.06-1
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+
+srun python preprocess_debates.py \
+  --data_dir data/raw_debates \
+  --output_dir /scratch-shared/lsaleh/debates

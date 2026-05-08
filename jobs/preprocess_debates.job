@@ -14,4 +14,5 @@ conda activate /scratch-shared/lsaleh/.conda/envs/thesis
 
 srun python preprocess_debates.py \
   --data_dir data/raw_debates \
-  --output_dir /scratch-shared/lsaleh/debates
+  --output_dir /scratch-shared/lsaleh/debates \
+  --debug

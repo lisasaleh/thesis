@@ -58,32 +58,26 @@ def load_json_document(json_path: str) -> Dict:
 
 
 def extract_text_from_json(doc: Dict) -> str:
-    preferred_keys = [
-        "foi_bodyText",
-        "dc_description",
-        "foi_text",
-        "text",
-        "bodyText",
-        "body_text",
-        "content",
-        "description",
-    ]
-
-    for key in preferred_keys:
-        value = doc.get(key)
-        if isinstance(value, str) and len(value.split()) > 10:
-            return clean_page_text(value)
-
-    # Fallback: use the longest string field in the JSON
-    string_fields = [
-        value for value in doc.values()
-        if isinstance(value, str) and len(value.split()) > 10
-    ]
-
-    if not string_fields:
-        return ""
-
-    return clean_page_text(max(string_fields, key=len))
+    """Extract and clean text from JSON document by joining all pages."""
+    all_text = []
+    
+    # Extract text from all pages in foi_files
+    foi_files = doc.get("foi_files", [])
+    
+    for file_obj in foi_files:
+        foi_pages = file_obj.get("foi_pages", [])
+        
+        # Sort pages by page number to maintain order
+        foi_pages_sorted = sorted(foi_pages, key=lambda p: p.get("foi_pageNumber", 0))
+        
+        for page in foi_pages_sorted:
+            page_text = page.get("foi_bodyText")
+            if page_text:
+                all_text.append(clean_page_text(page_text))
+    
+    # Join all pages with space
+    full_text = " ".join(all_text)
+    return re.sub(r"\s+", " ", full_text).strip()
 
 
 def split_interventions(text: str) -> List[Dict]:

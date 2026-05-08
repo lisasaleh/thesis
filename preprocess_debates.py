@@ -175,8 +175,7 @@ def load_valid_documents(debates_path: str, relevant_themes: Set[str]) -> Set[st
     valid_df = df[df['theme_id'].apply(has_relevant_theme)]
     
     # Use dc_identifier (matches JSON filenames) instead of dc_externalIdentifier
-    return set(valid_df['dc_identifier'].unique())
-
+    return set(valid_df['dc_identifier'].dropna().astype(str).str.strip().unique())
 
 def process_document(json_path: str, document_id: str, 
                     interventions_list: List[Dict], intervention_counter: Dict) -> None:
@@ -275,6 +274,12 @@ def main():
         
         # Find all JSON files in this year
         json_files = sorted(year_folder.glob("*.json"))
+        json_stems = {p.stem.strip() for p in json_files}
+        matches = json_stems & valid_docs
+
+        print(f"  JSON files: {len(json_files)}")
+        print(f"  Matching valid docs: {len(matches)}")
+        print(f"  Example matches: {list(matches)[:5]}")
         
         if not json_files:
             print(f"  No JSON files found in {year_folder}")

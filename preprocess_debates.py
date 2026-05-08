@@ -244,6 +244,15 @@ def main():
     print("Loading valid documents from debates.csv...")
     valid_docs = load_valid_documents(args.debates, relevant_themes)
     print(f"Found {len(valid_docs)} valid documents (day_count != -1, relevant themes)")
+
+    print("Sample valid_docs:")
+    print(list(valid_docs)[:10])
+
+    print("Sample JSON stems:")
+    for year_folder in sorted(Path(args.data_dir).iterdir()):
+        if year_folder.is_dir():
+            print([p.stem for p in sorted(year_folder.glob("*.json"))[:10]])
+            break
     
     # Process documents by year
     data_dir = Path(args.data_dir)

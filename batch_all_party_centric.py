@@ -768,9 +768,9 @@ def parse_args():
                         help="Output directory for summaries (default: scratch shared summaries)")
     parser.add_argument("--normalize_dir", type=str, default="/scratch-shared/lsaleh/debates/normalized",
                         help="Output directory for normalized claims")
-    parser.add_argument("--debates_csv", type=str, default="/scratch-shared/lsaleh/debates/debates.csv",
+    parser.add_argument("--debates_csv", type=str, default="outputs/debates.csv",
                         help="Path to debates.csv")
-    parser.add_argument("--cmp_manifest_csv", type=str, default="/scratch-shared/lsaleh/debates/cmp_manifest.csv",
+    parser.add_argument("--cmp_manifest_csv", type=str, default="outputs/cmp_manifest.csv",
                         help="Path to cmp_manifest.csv")
     parser.add_argument("--data_dir", type=str, default="/scratch-shared/lsaleh/debates",
                         help="Root directory containing debate CSV files")

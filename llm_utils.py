@@ -32,11 +32,24 @@ class LocalLLM:
 
         token_args = {"token": hf_token} if hf_token else {}
 
-        # If model_name is a local path, load tokenizer from local files only
-        if os.path.exists(model_name):
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+        # Decide whether to load from local files only.
+        local_only = (
+            os.path.exists(model_name)
+            or os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+            or os.environ.get("FORCE_LOCAL_ONLY") == "1"
+        )
+
+        # Use trust_remote_code to allow custom local code; safe when loading local artifacts.
+        trust_remote = True
+
+        if local_only:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name, local_files_only=True, trust_remote_code=trust_remote
+            )
         else:
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name, **token_args)
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name, trust_remote_code=trust_remote, **token_args
+            )
 
         print(
             f"[DEBUG] Loading model for: {model_name} | cuda={torch.cuda.is_available()}",
@@ -48,20 +61,21 @@ class LocalLLM:
             raise RuntimeError("CUDA not available")
 
         try:
-            # Prefer local_files_only when loading from a local path to avoid HF hub validation
-            if os.path.exists(model_name):
+            # Load model with local_files_only when appropriate to avoid contacting HF hub on compute nodes.
+            model_kwargs = {
+                "device_map": "auto",
+                "dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                "trust_remote_code": True,
+            }
+
+            if local_only:
                 self.model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    device_map="auto",
-                    dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                    local_files_only=True,
+                    model_name, local_files_only=True, **model_kwargs
                 )
             else:
+                # pass token args when not local-only (e.g., access token)
                 self.model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    device_map="auto",
-                    dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                    **token_args
+                    model_name, **model_kwargs, **token_args
                 )
         except Exception as e:
             print(f"[ERROR] from_pretrained failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)

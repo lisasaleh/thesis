@@ -442,6 +442,9 @@ def process_party_staged(
             party, cmp_info, debate_ids, debates_csv, data_dir,
             temp_batch_input, min_tokens, logger
         )
+
+        stats["total_debates_batch_input"] += num_included
+        stats["total_debates_skipped"] += num_skipped
         
         if num_included == 0:
             logger.log(f"No valid debates for CMP rank {cmp_rank} after filtering")
@@ -449,9 +452,6 @@ def process_party_staged(
             if os.path.exists(temp_batch_input):
                 os.remove(temp_batch_input)
             continue
-        
-        stats["total_debates_batch_input"] += num_included
-        stats["total_debates_skipped"] += num_skipped
         
         # Step 2: Extract (batch) - load model ONCE for all debates
         logger.log(f"\n[1/3] Extraction (batch of {num_included} debates)...")
@@ -599,17 +599,17 @@ def parse_args():
                         help="Minimum word count threshold (default: 100)")
     
     # Directories
-    parser.add_argument("--extract_dir", type=str, default="outputs/extracted",
+    parser.add_argument("--extract_dir", type=str, default="/scratch-shared/lsaleh/extracted",
                         help="Output directory for extraction")
-    parser.add_argument("--summary_dir", type=str, default="outputs/summaries",
+    parser.add_argument("--summary_dir", type=str, default="/scratch-shared/lsaleh/summaries",
                         help="Output directory for summaries")
-    parser.add_argument("--normalize_dir", type=str, default="outputs/normalized",
+    parser.add_argument("--normalize_dir", type=str, default="/scratch-shared/lsaleh/normalized",
                         help="Output directory for normalized claims")
     parser.add_argument("--debates_csv", type=str, default="outputs/debates.csv",
                         help="Path to debates.csv")
     parser.add_argument("--cmp_manifest_csv", type=str, default="outputs/cmp_manifest.csv",
                         help="Path to cmp_manifest.csv")
-    parser.add_argument("--data_dir", type=str, default="data",
+    parser.add_argument("--data_dir", type=str, default="/scratch-shared/lsaleh/debates/",
                         help="Root directory containing debate CSV files")
     
     # Control flags

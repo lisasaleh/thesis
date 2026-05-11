@@ -32,7 +32,11 @@ class LocalLLM:
 
         token_args = {"token": hf_token} if hf_token else {}
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, **token_args)
+        # If model_name is a local path, load tokenizer from local files only
+        if os.path.exists(model_name):
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, **token_args)
 
         print(
             f"[DEBUG] Loading model for: {model_name} | cuda={torch.cuda.is_available()}",
@@ -44,12 +48,21 @@ class LocalLLM:
             raise RuntimeError("CUDA not available")
 
         try:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map="auto",
-                dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                **token_args
-            )
+            # Prefer local_files_only when loading from a local path to avoid HF hub validation
+            if os.path.exists(model_name):
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    device_map="auto",
+                    dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                    local_files_only=True,
+                )
+            else:
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    device_map="auto",
+                    dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                    **token_args
+                )
         except Exception as e:
             print(f"[ERROR] from_pretrained failed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             traceback.print_exc()

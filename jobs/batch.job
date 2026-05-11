@@ -13,7 +13,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 
 conda activate /scratch-shared/lsaleh/.conda/envs/thesis
 
-python batch_all_party_centric.py \
+python batch_party.py \
 --party VVD \
 --model_7b /scratch-shared/lsaleh/models/Qwen2.5-7B-Instruct \
 --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct

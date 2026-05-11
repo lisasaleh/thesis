@@ -341,12 +341,12 @@ def process_party_staged(
     model_7b: str,
     model_32b: str,
     min_tokens: int = 100,
-    extract_dir: str = "outputs/extracted",
-    summary_dir: str = "outputs/summaries",
-    normalize_dir: str = "outputs/normalized",
+    extract_dir: str = "/scratch-shared/lsaleh/extracted",
+    summary_dir: str = "/scratch-shared/lsaleh/summaries",
+    normalize_dir: str = "/scratch-shared/lsaleh/normalized",
     debates_csv: str = "outputs/debates.csv",
     cmp_manifest_csv: str = "outputs/cmp_manifest.csv",
-    data_dir: str = "data",
+    data_dir: str = "/scratch-shared/lsaleh/debates/",
     resume: bool = False,
     metadata_csv: str = "outputs/debate_cmp_metadata.csv"
 ):

@@ -42,10 +42,11 @@ PARTIES = [
 class Orchestrator:
     """Orchestrate party-centric pipeline across multiple parties."""
     
-    def __init__(self, model_7b: str, model_32b: str, min_tokens: int = 300):
+    def __init__(self, model_7b: str, model_32b: str, min_tokens: int = 300, data_dir: str = "/scratch-shared/lsaleh/debates/"):
         self.model_7b = model_7b
         self.model_32b = model_32b
         self.min_tokens = min_tokens
+        self.data_dir = data_dir
         self.log_file = f"orchestrator_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         self.results = {}
     
@@ -79,12 +80,12 @@ class Orchestrator:
                 self.log(f"  ✓ Found: {file}")
         
         # Check for data directory
-        if not os.path.exists("data/2012"):
-            self.log("  ✗ Missing data directory: data/2012")
-            missing.append("data/2012")
+        if not os.path.exists(self.data_dir):
+            self.log(f"  ✗ Missing data directory: {self.data_dir}")
+            missing.append(self.data_dir)
         else:
-            n_files = len(os.listdir("data/2012"))
-            self.log(f"  ✓ Data directory found: data/2012 ({n_files} files)")
+            n_files = len(os.listdir(self.data_dir))
+            self.log(f"  ✓ Data directory found: {self.data_dir} ({n_files} files)")
         
         # Check models are accessible
         self.log(f"\n  Model 7B: {self.model_7b}")
@@ -121,7 +122,8 @@ class Orchestrator:
             "--party", party,
             "--model_7b", self.model_7b,
             "--model_32b", self.model_32b,
-            "--min_tokens", str(self.min_tokens)
+            "--min_tokens", str(self.min_tokens),
+            "--data_dir", self.data_dir
         ]
         
         if resume:
@@ -241,6 +243,8 @@ def parse_args():
                         help="7B model name")
     parser.add_argument("--model_32b", type=str,
                         help="32B model name")
+    parser.add_argument("--data_dir", type=str, default="/scratch-shared/lsaleh/debates",
+                        help="Path to debates root directory (default: /scratch-shared/lsaleh/debates)")
     parser.add_argument("--min_tokens", type=int, default=300,
                         help="Minimum token threshold")
     parser.add_argument("--parties", type=str, default=None,
@@ -279,7 +283,7 @@ def main():
         parties = PARTIES
     
     # Create orchestrator
-    orchestrator = Orchestrator(args.model_7b, args.model_32b, args.min_tokens)
+    orchestrator = Orchestrator(args.model_7b, args.model_32b, args.min_tokens, args.data_dir)
     
     # Validate setup
     if not orchestrator.validate_setup():

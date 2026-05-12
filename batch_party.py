@@ -144,6 +144,7 @@ def find_debates_for_themes(
 ) -> List[str]:
     """
     Find debate document_ids that contain any of the given theme_ids.
+    Excludes debates with day_count == -1 (out of date range).
     
     Returns sorted list of unique debate_ids.
     """
@@ -151,6 +152,10 @@ def find_debates_for_themes(
     
     # Filter rows where theme_id matches any in the themes list
     matching = df[df["theme_id"].isin(themes)]
+    
+    # Exclude debates with day_count == -1 (out of date range)
+    matching = matching[matching["day_count"] != -1]
+    
     debate_ids = sorted(matching["dc_identifier"].unique().tolist())
     
     return debate_ids
@@ -280,6 +285,8 @@ def build_cmp_batch_input_csv(
             "document_id": debate_id,
             "intervention_id": 1,  # Aggregated as single intervention
             "party": party,
+            "speaker": party,  # For batch, speaker is the party aggregate
+            "speaker_label": party,  # For batch, no individual speaker label
             "speech": party_text,
             "n_words": word_count,
             "date": date_value,
@@ -469,7 +476,7 @@ def process_party_staged(
         # Find debates with these themes
         try:
             debate_ids = find_debates_for_themes(theme_ids, debates_csv)
-            logger.log(f"Found {len(debate_ids)} total debates matching these themes")
+            logger.log(f"Found {len(debate_ids)} debates matching these themes (day_count != -1, i.e., within date range)")
         except Exception as e:
             logger.log(f"ERROR finding debates: {e}", level="ERROR")
             stats["cmp_ranks_failed"] += 1
@@ -580,12 +587,11 @@ def process_party_staged(
         normalize_cmd = [
             "python", "normalize.py",
             "--claims_csv", extract_output,
-            "--debates_csv", debates_csv,
+            "--debates_csv", temp_batch_input,
             "--summaries_csv", summary_output,
             "--output_dir", temp_normalize_dir,
             "--party", party,
-            "--model_name", model_32b,
-            "--doc_id_col", "dc_identifier"
+            "--model_name", model_32b
         ]
         
         normalize_success = run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}", fatal=False)

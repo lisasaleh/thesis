@@ -303,8 +303,15 @@ def build_cmp_batch_input_csv(
 # File & Output Management
 # ============================================================================
 
-def run_command(cmd: List[str], description: str) -> bool:
-    """Run shell command and log result."""
+def run_command(cmd: List[str], description: str, fatal: bool = False) -> bool:
+    """
+    Run shell command and log result.
+    
+    Args:
+        cmd: Command to run
+        description: Description of command
+        fatal: If False, continue on error; if True, treat as fatal failure
+    """
     print(f"\n{'='*80}")
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {description}")
     print(f"{'='*80}")
@@ -312,7 +319,11 @@ def run_command(cmd: List[str], description: str) -> bool:
     
     result = subprocess.run(cmd, capture_output=False)
     if result.returncode != 0:
-        print(f"\n[ERROR] {description} failed with exit code {result.returncode}")
+        msg = f"[WARNING] {description} failed with exit code {result.returncode}"
+        if fatal:
+            print(f"\n[FATAL] {msg}")
+        else:
+            print(f"\n{msg} - CONTINUING ANYWAY")
         return False
     
     print(f"\n[SUCCESS] {description} completed")
@@ -467,17 +478,17 @@ def process_party_staged(
             "--target_party", party
         ]
         
-        if not run_command(extract_cmd, f"Extract CMP Rank {cmp_rank}"):
-            logger.log(f"FAILED: extraction for CMP rank {cmp_rank}", level="ERROR")
-            stats["cmp_ranks_failed"] += 1
-            continue
+        extract_success = run_command(extract_cmd, f"Extract CMP Rank {cmp_rank}", fatal=False)
         
-        # Find extracted output
-        extract_output = find_latest_file(temp_extract_dir, f"{party}_claims")
+        # Find extracted output - if extraction failed, try to continue anyway
+        extract_output = find_latest_file(temp_extract_dir, f"{party}_claims") if extract_success else None
+        
         if not extract_output:
-            logger.log(f"ERROR: no extract output found in {temp_extract_dir}", level="ERROR")
-            stats["cmp_ranks_failed"] += 1
-            continue
+            logger.log(f"WARNING: no extract output found in {temp_extract_dir}", level="WARN")
+            logger.log(f"  → This CMP rank will have no extracted claims")
+            extract_output = None  # Will skip normalization
+        else:
+            logger.log(f"  ✓ Found extraction output: {extract_output}")
         
         # Step 3: Summarize (batch) - load model ONCE for all debates
         logger.log(f"\n[2/3] Summarization (batch of {num_included} debates)...")
@@ -491,20 +502,34 @@ def process_party_staged(
             "--model_name", model_7b
         ]
         
-        if not run_command(summary_cmd, f"Summarize CMP Rank {cmp_rank}"):
-            logger.log(f"FAILED: summarization for CMP rank {cmp_rank}", level="ERROR")
-            stats["cmp_ranks_failed"] += 1
-            continue
+        summary_success = run_command(summary_cmd, f"Summarize CMP Rank {cmp_rank}", fatal=False)
         
         # Find summary output
-        summary_output = find_latest_file(temp_summary_dir, "summary")
+        summary_output = find_latest_file(temp_summary_dir, "summary") if summary_success else None
+        
         if not summary_output:
-            logger.log(f"ERROR: no summary output found in {temp_summary_dir}", level="ERROR")
+            logger.log(f"WARNING: no summary output found in {temp_summary_dir}", level="WARN")
+            logger.log(f"  → This CMP rank will have no summaries")
+            summary_output = None
+        else:
+            logger.log(f"  ✓ Found summary output: {summary_output}")
+        
+        # Step 4: Normalize (batch) - only run if we have both extract and summary outputs
+        logger.log(f"\n[3/3] Normalization (batch of {num_included} debates)...")
+        
+        if not extract_output or not summary_output:
+            logger.log(f"SKIPPING normalization: missing extract ({extract_output is not None}) or summary ({summary_output is not None})", level="WARN")
             stats["cmp_ranks_failed"] += 1
+            # Cleanup
+            for temp_d in [temp_extract_dir, temp_summary_dir]:
+                try:
+                    import shutil
+                    if os.path.exists(temp_d):
+                        shutil.rmtree(temp_d)
+                except:
+                    pass
             continue
         
-        # Step 4: Normalize (batch) - load model ONCE for all debates
-        logger.log(f"\n[3/3] Normalization (batch of {num_included} debates)...")
         temp_normalize_dir = os.path.join(".tmp_batch", f"normalize_cmp_{cmp_rank}")
         os.makedirs(temp_normalize_dir, exist_ok=True)
         
@@ -518,32 +543,39 @@ def process_party_staged(
             "--model_name", model_32b
         ]
         
-        if not run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}"):
-            logger.log(f"FAILED: normalization for CMP rank {cmp_rank}", level="ERROR")
-            stats["cmp_ranks_failed"] += 1
-            continue
+        normalize_success = run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}", fatal=False)
         
         # Find normalized output
-        normalize_output = find_latest_file(temp_normalize_dir, f"{party}_normalized")
+        normalize_output = find_latest_file(temp_normalize_dir, f"{party}_normalized") if normalize_success else None
+        
         if not normalize_output:
-            logger.log(f"ERROR: no normalize output found in {temp_normalize_dir}", level="ERROR")
+            logger.log(f"WARNING: no normalize output found in {temp_normalize_dir}", level="WARN")
             stats["cmp_ranks_failed"] += 1
+            for temp_d in [temp_extract_dir, temp_summary_dir, temp_normalize_dir]:
+                try:
+                    import shutil
+                    if os.path.exists(temp_d):
+                        shutil.rmtree(temp_d)
+                except:
+                    pass
             continue
         
         # Step 5: Move outputs to final directories
         logger.log(f"\nMoving outputs to final directories...")
         
         # Move extracted
-        extracted_final = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
-        os.makedirs(os.path.dirname(extracted_final), exist_ok=True)
-        os.replace(extract_output, extracted_final)
-        logger.log(f"  → {extracted_final}")
+        if extract_output:
+            extracted_final = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
+            os.makedirs(os.path.dirname(extracted_final), exist_ok=True)
+            os.replace(extract_output, extracted_final)
+            logger.log(f"  → {extracted_final}")
         
         # Move summary
-        summary_final = os.path.join(summary_dir, f"{party}_cmp_{cmp_rank}_summary.csv")
-        os.makedirs(os.path.dirname(summary_final), exist_ok=True)
-        os.replace(summary_output, summary_final)
-        logger.log(f"  → {summary_final}")
+        if summary_output:
+            summary_final = os.path.join(summary_dir, f"{party}_cmp_{cmp_rank}_summary.csv")
+            os.makedirs(os.path.dirname(summary_final), exist_ok=True)
+            os.replace(summary_output, summary_final)
+            logger.log(f"  → {summary_final}")
         
         # Move normalized
         normalized_final = os.path.join(normalize_dir, f"{party}_cmp_{cmp_rank}_normalized.csv")
@@ -570,8 +602,8 @@ def process_party_staged(
     logger.log(f"FINAL SUMMARY FOR {party}")
     logger.log(f"{'='*80}")
     logger.log(f"  CMP Ranks Processed:        {stats['cmp_ranks_processed']}")
-    logger.log(f"  CMP Ranks Completed:        {stats['cmp_ranks_completed']}")
-    logger.log(f"  CMP Ranks Failed:           {stats['cmp_ranks_failed']}")
+    logger.log(f"  CMP Ranks Completed:        {stats['cmp_ranks_completed']} ✓")
+    logger.log(f"  CMP Ranks Failed:           {stats['cmp_ranks_failed']} ✗")
     logger.log(f"  Total Debates in Batches:   {stats['total_debates_batch_input']}")
     logger.log(f"  Total Debates Skipped:      {stats['total_debates_skipped']}")
     logger.log(f"{'='*80}")

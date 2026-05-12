@@ -100,7 +100,7 @@ def normalize_single_quote(
     raw_output = llm.generate(
         prompt=user_prompt,
         system_prompt=NORMALIZATION_SYSTEM_PROMPT,
-        max_new_tokens=300,
+        max_new_tokens=500,
         temperature=0.0,
     )
 

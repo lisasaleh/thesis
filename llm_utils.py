@@ -295,42 +295,66 @@ def extract_json_with_repair(text: str, llm: LocalLLM = None) -> Dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # Attempt 3: repair via model
+    # Attempt 3: escape control characters in strings
+    escaped = candidate
+    # Replace unescaped newlines/tabs inside string values with escaped versions
+    escaped = re.sub(r'([^\\])\n', r'\1\\n', escaped)
+    escaped = re.sub(r'([^\\])\t', r'\1\\t', escaped)
+    escaped = re.sub(r'([^\\])\r', r'\1\\r', escaped)
+    
+    try:
+        return json.loads(escaped)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 4: repair via model (if LLM available)
     if llm is not None:
+        # Check if JSON looks truncated (ends with incomplete structure)
+        is_truncated = candidate.count('"') % 2 == 1 or not candidate.rstrip().endswith('}')
+        
         repair_prompt = f"""
-Maak van onderstaande tekst geldige JSON.
+Maak van onderstaande tekst geldige JSON. Het kan onvolledig zijn.
 
 Regels:
-- Geef alleen geldige JSON terug.
+- Geef ALLEEN geldige JSON terug, niets anders.
 - Voeg geen uitleg toe.
 - Verander de betekenis niet.
 - Behoud exact dezelfde velden.
 - Sluit alle haken en accolades correct af.
+- Escape alle newlines en speciale tekens in strings.
 
 Tekst:
 {candidate}
 """.strip()
 
-        repaired = llm.generate(
-            prompt=repair_prompt,
-            max_new_tokens=512,
-            temperature=0.0,
-        )
-
-        repaired = _strip_fences(repaired)
-
-        match_repaired = re.search(r"\{.*", repaired, flags=re.DOTALL)
-        if match_repaired:
-            repaired = match_repaired.group(0).strip()
-
-        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
-
         try:
-            return json.loads(repaired)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"JSON-reparatie mislukt.\nOrigineel:\n{candidate}\n\nGerepareerd:\n{repaired}\n\nError: {e}"
+            repaired = llm.generate(
+                prompt=repair_prompt,
+                max_new_tokens=512,
+                temperature=0.0,
             )
+
+            repaired = _strip_fences(repaired)
+
+            match_repaired = re.search(r"\{.*", repaired, flags=re.DOTALL)
+            if match_repaired:
+                repaired = match_repaired.group(0).strip()
+
+            repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+        except Exception:
+            pass
+    
+    # Attempt 5: If all else fails and JSON is truncated, return empty structure
+    is_truncated = candidate.count('"') % 2 == 1 or not candidate.rstrip().endswith('}')
+    if is_truncated:
+        import sys
+        print(f"[WARN] JSON truncated, returning empty result for: {candidate[:100]}...", file=sys.stderr)
+        return {"claims": []}
 
     raise ValueError(f"JSON parsing mislukt:\n{candidate}")
 

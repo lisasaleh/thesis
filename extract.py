@@ -1,6 +1,8 @@
 import os
 import json
 import argparse
+import re
+import sys
 from typing import Dict, Any
 from datetime import datetime
 
@@ -56,11 +58,16 @@ def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def extract_claims(llm, intervention_text: str):
+    # Pre-process: escape problematic characters
+    cleaned_text = intervention_text.replace('\n', ' ').replace('\t', ' ').replace('\r', ' ')
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+    
     prompt = build_claim_extraction_prompt(
-        text=intervention_text,
+        text=cleaned_text,
     )
 
-    parsed = generate_json(llm, prompt, max_new_tokens=300)
+    # Increased token limit to handle longer extractions
+    parsed = generate_json(llm, prompt, max_new_tokens=1200)
     parsed = validate_claim_extraction_output(parsed)
 
     return {
@@ -189,7 +196,13 @@ def main():
 
         except Exception as e:
             print(f"[ERROR] Failed on row {i}: {e}", flush=True)
-            raise
+            # Gracefully skip problematic rows instead of crashing
+            row_dict["claim_extraction_raw"] = f"ERROR: {str(e)[:200]}"
+            row_dict["claim_extraction_json"] = json.dumps({"claims": []}, ensure_ascii=False)
+            row_dict["n_claims"] = 0
+            processed_records.append(row_dict)
+            pd.DataFrame(processed_records).to_csv(output_csv, index=False)
+            continue
 
         # Store results
         row_dict["claim_extraction_raw"] = model_output_json

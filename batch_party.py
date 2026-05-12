@@ -343,6 +343,43 @@ def find_latest_file(directory: str, pattern: str) -> Optional[str]:
     return os.path.join(directory, files[0])
 
 
+def concatenate_summary_csvs(directory: str, output_csv: str) -> bool:
+    """
+    Concatenate all *_summary*.csv files in a directory into one combined CSV.
+    
+    incr_summary.py writes one file per document, but normalization needs
+    all summaries in one file for lookup.
+    
+    Args:
+        directory: Directory containing summary CSV files
+        output_csv: Path to write combined CSV
+    
+    Returns:
+        True if successful, False if no files found
+    """
+    if not os.path.exists(directory):
+        return False
+    
+    csv_files = sorted([
+        os.path.join(directory, f)
+        for f in os.listdir(directory)
+        if f.endswith("_summary.csv") or (f.endswith(".csv") and "summary" in f)
+    ])
+    
+    if not csv_files:
+        return False
+    
+    try:
+        dfs = [pd.read_csv(f) for f in csv_files]
+        combined_df = pd.concat(dfs, ignore_index=True)
+        combined_df.to_csv(output_csv, index=False)
+        print(f"[DEBUG] Concatenated {len(csv_files)} summary files into {output_csv}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to concatenate summary CSVs: {e}")
+        return False
+
+
 # ============================================================================
 # Main Pipeline
 # ============================================================================
@@ -469,6 +506,9 @@ def process_party_staged(
         temp_extract_dir = os.path.join(".tmp_batch", f"extract_cmp_{cmp_rank}")
         os.makedirs(temp_extract_dir, exist_ok=True)
         
+        # NOTE: 7B model loads here, then reloads again in summarization (Step 3)
+        # Future optimization: Refactor to load 7B once and run extract+summary sequentially
+        # in the same Python process to avoid model reload overhead.
         extract_cmd = [
             "python", "extract.py",
             "--input_csv", temp_batch_input,
@@ -495,6 +535,9 @@ def process_party_staged(
         temp_summary_dir = os.path.join(".tmp_batch", f"summary_cmp_{cmp_rank}")
         os.makedirs(temp_summary_dir, exist_ok=True)
         
+        # NOTE: 7B model loads here (already loaded once in extract, Step 2)
+        # Model reload is necessary because extract.py runs in a separate Python process
+        # To avoid this reload, combine extract+summary into a single pipeline in the same process
         summary_cmd = [
             "python", "incr_summary.py",
             "--input_csv", temp_batch_input,
@@ -504,15 +547,16 @@ def process_party_staged(
         
         summary_success = run_command(summary_cmd, f"Summarize CMP Rank {cmp_rank}", fatal=False)
         
-        # Find summary output
-        summary_output = find_latest_file(temp_summary_dir, "summary") if summary_success else None
+        # Concatenate all per-document summary files into one combined summary CSV
+        combined_summary_output = os.path.join(temp_summary_dir, "combined_summary.csv")
+        summary_concat_success = concatenate_summary_csvs(temp_summary_dir, combined_summary_output)
         
-        if not summary_output:
-            logger.log(f"WARNING: no summary output found in {temp_summary_dir}", level="WARN")
-            logger.log(f"  → This CMP rank will have no summaries")
+        if not summary_concat_success:
+            logger.log(f"WARNING: Failed to concatenate summary files in {temp_summary_dir}", level="WARN")
             summary_output = None
         else:
-            logger.log(f"  ✓ Found summary output: {summary_output}")
+            logger.log(f"  ✓ Combined {len([f for f in os.listdir(temp_summary_dir) if 'summary.csv' in f])} summary files: {combined_summary_output}")
+            summary_output = combined_summary_output
         
         # Step 4: Normalize (batch) - only run if we have both extract and summary outputs
         logger.log(f"\n[3/3] Normalization (batch of {num_included} debates)...")
@@ -540,7 +584,8 @@ def process_party_staged(
             "--summaries_csv", summary_output,
             "--output_dir", temp_normalize_dir,
             "--party", party,
-            "--model_name", model_32b
+            "--model_name", model_32b,
+            "--doc_id_col", "dc_identifier"
         ]
         
         normalize_success = run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}", fatal=False)

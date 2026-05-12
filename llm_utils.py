@@ -2,6 +2,7 @@ import json
 import os
 import re
 import sys
+import warnings
 from typing import Dict, Any
 import traceback
 
@@ -186,14 +187,18 @@ class LocalLLM:
         )
         
         with torch.no_grad():
-            output_ids = self.model.generate(
-                **model_inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=(temperature > 0),
-                temperature=temperature if temperature > 0 else None,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
-            )
+            # Suppress warning about unused generation kwargs (top_p, top_k)
+            # They're only used when do_sample=True
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
+                output_ids = self.model.generate(
+                    **model_inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=(temperature > 0),
+                    temperature=temperature if temperature > 0 else None,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                )
         
         results = []
         for i in range(len(prompts)):
@@ -245,14 +250,18 @@ class LocalLLM:
         )
 
         with torch.no_grad():
-            output_ids = self.model.generate(
-                **model_inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=(temperature > 0),
-                temperature=temperature if temperature > 0 else None,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
-            )
+            # Suppress warning about unused generation kwargs (top_p, top_k)
+            # They're only used when do_sample=True
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
+                output_ids = self.model.generate(
+                    **model_inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=(temperature > 0),
+                    temperature=temperature if temperature > 0 else None,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                )
 
         generated_ids = output_ids[0][input_len:]
         text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)

@@ -64,7 +64,7 @@ class Orchestrator:
         required_files = [
             "outputs/cmp_manifest.csv",
             "outputs/debates.csv",
-            "batch_all_party_centric.py",
+            "batch_party.py",
             "extract.py",
             "incr_summary.py",
             "normalize.py"
@@ -117,7 +117,7 @@ class Orchestrator:
         self.log(f"{'='*80}")
         
         cmd = [
-            "python", "batch_all_party_centric.py",
+            "python", "batch_party.py",
             "--party", party,
             "--model_7b", self.model_7b,
             "--model_32b", self.model_32b,

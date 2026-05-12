@@ -68,23 +68,30 @@ class ProcessingLogger:
         with open(self.log_file, 'a') as f:
             f.write(full_msg + "\n")
     
-    def save_checkpoint(self, completed_cmp_ranks: Set[int]):
-        """Save completed CMP ranks."""
+    def save_checkpoint(self, completed_stages: Dict[int, List[str]]):
+        """Save completed stages for each CMP rank.
+        
+        Format: {1: ["extract", "summarize", "normalize"], 2: ["extract"], ...}
+        """
         with open(self.checkpoint_file, 'w') as f:
-            json.dump({
-                "completed_cmp_ranks": sorted(list(completed_cmp_ranks))
-            }, f, indent=2)
+            # Convert to string keys for JSON serialization
+            json_data = {str(k): v for k, v in completed_stages.items()}
+            json.dump({"completed_stages": json_data}, f, indent=2)
     
-    def load_checkpoint(self) -> Set[int]:
-        """Load completed CMP ranks."""
+    def load_checkpoint(self) -> Dict[int, List[str]]:
+        """Load completed stages for each CMP rank.
+        
+        Returns dict like: {1: ["extract", "summarize"], 2: ["extract"]}
+        """
         if not os.path.exists(self.checkpoint_file):
-            return set()
+            return {}
         try:
             with open(self.checkpoint_file, 'r') as f:
                 data = json.load(f)
-                return set(item for item in data.get("completed_cmp_ranks", []))
+                # Convert string keys back to ints
+                return {int(k): v for k, v in data.get("completed_stages", {}).items()}
         except:
-            return set()
+            return {}
 
 
 # ============================================================================
@@ -429,10 +436,15 @@ def process_party_staged(
         os.makedirs(d, exist_ok=True)
     
     # Load checkpoint if resuming
-    completed_ranks = set()
+    completed_stages = {}
     if resume:
-        completed_ranks = logger.load_checkpoint()
-        logger.log(f"Resuming: CMP ranks {sorted(completed_ranks)} already completed")
+        completed_stages = logger.load_checkpoint()
+        if completed_stages:
+            logger.log(f"Resuming: Found completed stages for {len(completed_stages)} ranks")
+            for rank, stages in sorted(completed_stages.items()):
+                logger.log(f"  Rank {rank}: {', '.join(stages)}")
+        else:
+            logger.log(f"Resuming: No checkpoint found, starting fresh")
     
     # Load CMP manifest
     try:
@@ -464,9 +476,22 @@ def process_party_staged(
         cmp_code = cmp_info["code"]
         theme_ids = cmp_info["theme_ids"]
         
-        # Skip if already completed
-        if cmp_rank in completed_ranks:
-            logger.log(f"Skipping CMP Rank {cmp_rank}: already completed")
+        # Define temp directories at start of loop (before any conditional branches)
+        # This ensures they exist even if stages are skipped on resume
+        temp_extract_dir = os.path.join(".tmp_batch", f"extract_cmp_{cmp_rank}")
+        temp_summary_dir = os.path.join(".tmp_batch", f"summary_cmp_{cmp_rank}")
+        temp_normalize_dir = os.path.join(".tmp_batch", f"normalize_cmp_{cmp_rank}")
+        
+        # Track summary files moved for THIS rank (to avoid pollution from other CMPs)
+        summary_files_moved_this_rank = []
+        
+        # Initialize stages for this rank if not present
+        if cmp_rank not in completed_stages:
+            completed_stages[cmp_rank] = []
+        
+        # Skip if already fully completed
+        if set(completed_stages[cmp_rank]) >= {"extract", "summarize", "normalize"}:
+            logger.log(f"Skipping CMP Rank {cmp_rank}: already fully completed")
             continue
         
         logger.log(f"\n{'='*80}")
@@ -512,93 +537,114 @@ def process_party_staged(
         
         # Step 2: Extract (batch) - load model ONCE for all debates
         logger.log(f"\n[1/3] Extraction (batch of {num_included} debates)...")
-        temp_extract_dir = os.path.join(".tmp_batch", f"extract_cmp_{cmp_rank}")
-        os.makedirs(temp_extract_dir, exist_ok=True)
         
-        # NOTE: 7B model loads here, then reloads again in summarization (Step 3)
-        # Future optimization: Refactor to load 7B once and run extract+summary sequentially
-        # in the same Python process to avoid model reload overhead.
-        extract_cmd = [
-            "python", "extract.py",
-            "--input_csv", temp_batch_input,
-            "--output_dir", temp_extract_dir,
-            "--party", party,
-            "--model_name", model_7b,
-            "--target_party", party
-        ]
-        
-        extract_success = run_command(extract_cmd, f"Extract CMP Rank {cmp_rank}", fatal=False)
-        
-        # Find extracted output - if extraction failed, try to continue anyway
-        extract_output = find_latest_file(temp_extract_dir, f"{party}_claims") if extract_success else None
-        
-        if not extract_output:
-            logger.log(f"WARNING: no extract output found in {temp_extract_dir}", level="WARN")
-            logger.log(f"  → This CMP rank will have no extracted claims")
-            extract_output = None  # Will skip normalization
-        else:
-            logger.log(f"  ✓ Found extraction output: {extract_output}")
-            # Move extract output to final directory immediately
-            extracted_final = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
-            os.makedirs(os.path.dirname(extracted_final), exist_ok=True)
-            shutil.move(extract_output, extracted_final)
-            logger.log(f"  ✓ Moved to final: {extracted_final}")
+        # Check if extraction already completed - if so, load from durable storage
+        extracted_final = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
+        if "extract" in completed_stages.get(cmp_rank, []) and os.path.exists(extracted_final):
+            logger.log(f"  [SKIPPED] Extraction already completed, loading from: {extracted_final}")
             extract_output = extracted_final
+        else:
+            # Run extraction
+            os.makedirs(temp_extract_dir, exist_ok=True)
+            
+            # NOTE: 7B model loads here, then reloads again in summarization (Step 3)
+            # Future optimization: Refactor to load 7B once and run extract+summary sequentially
+            # in the same Python process to avoid model reload overhead.
+            extract_cmd = [
+                "python", "extract.py",
+                "--input_csv", temp_batch_input,
+                "--output_dir", temp_extract_dir,
+                "--party", party,
+                "--model_name", model_7b,
+                "--target_party", party
+            ]
+            
+            extract_success = run_command(extract_cmd, f"Extract CMP Rank {cmp_rank}", fatal=False)
+            
+            # Find extracted output - if extraction failed, try to continue anyway
+            extract_output = find_latest_file(temp_extract_dir, f"{party}_claims") if extract_success else None
+            
+            if not extract_output:
+                logger.log(f"WARNING: no extract output found in {temp_extract_dir}", level="WARN")
+                logger.log(f"  → This CMP rank will have no extracted claims")
+                extract_output = None  # Will skip normalization
+            else:
+                logger.log(f"  ✓ Found extraction output: {extract_output}")
+                # Move extract output to final directory immediately
+                os.makedirs(os.path.dirname(extracted_final), exist_ok=True)
+                shutil.move(extract_output, extracted_final)
+                logger.log(f"  ✓ Moved to final: {extracted_final}")
+                extract_output = extracted_final
+                
+                # Mark extraction stage as complete
+                if "extract" not in completed_stages[cmp_rank]:
+                    completed_stages[cmp_rank].append("extract")
+                    logger.save_checkpoint(completed_stages)
+                    logger.log(f"  [CHECKPOINT] Rank {cmp_rank}: extract completed")
         
         # Step 3: Summarize (batch) - load model ONCE for all debates
         logger.log(f"\n[2/3] Summarization (batch of {num_included} debates)...")
-        temp_summary_dir = os.path.join(".tmp_batch", f"summary_cmp_{cmp_rank}")
-        os.makedirs(temp_summary_dir, exist_ok=True)
         
-        # NOTE: 7B model loads here (already loaded once in extract, Step 2)
-        # Model reload is necessary because extract.py runs in a separate Python process
-        # To avoid this reload, combine extract+summary into a single pipeline in the same process
-        summary_cmd = [
-            "python", "incr_summary.py",
-            "--input_csv", temp_batch_input,
-            "--output_dir", temp_summary_dir,
-            "--model_name", model_7b
-        ]
-        
-        summary_success = run_command(summary_cmd, f"Summarize CMP Rank {cmp_rank}", fatal=False)
-        
-        # Move individual per-document summary files to final directory
-        # (Don't concatenate - summaries are document-level, not party/rank-specific)
-        summary_files_moved = 0
-        if summary_success:
-            for summary_file in os.listdir(temp_summary_dir):
-                if summary_file.endswith("_summary.csv") and summary_file != "combined_summary.csv":
-                    # Extract doc_id from filename and rename
-                    doc_id = summary_file.replace("_summary.csv", "")
-                    src_path = os.path.join(temp_summary_dir, summary_file)
-                    dst_path = os.path.join(summary_dir, f"{doc_id}_summarized.csv")
-                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                    shutil.move(src_path, dst_path)
-                    summary_files_moved += 1
-            
-            logger.log(f"  ✓ Moved {summary_files_moved} individual summary files to {summary_dir}")
-        
-        if summary_files_moved == 0:
-            logger.log(f"WARNING: No summary files moved to final directory", level="WARN")
-            summary_output = None
+        # Check if summarization already completed
+        combined_summary_output = os.path.join(
+            summary_dir, f"{party}_cmp_{cmp_rank}_combined_summary_for_normalize.csv"
+        )
+        if "summarize" in completed_stages.get(cmp_rank, []) and os.path.exists(combined_summary_output):
+            logger.log(f"  [SKIPPED] Summarization already completed, loading from: {combined_summary_output}")
+            summary_output = combined_summary_output
         else:
-            # Create combined summary in durable location for normalization
-            combined_summary_output = os.path.join(
-                summary_dir, f"{party}_cmp_{cmp_rank}_combined_summary_for_normalize.csv"
-            )
-            summary_files_in_final = [
-                os.path.join(summary_dir, f) 
-                for f in os.listdir(summary_dir) 
-                if f.endswith("_summarized.csv")
+            # Run summarization
+            os.makedirs(temp_summary_dir, exist_ok=True)
+            
+            # NOTE: 7B model loads here (already loaded once in extract, Step 2)
+            # Model reload is necessary because extract.py runs in a separate Python process
+            # To avoid this reload, combine extract+summary into a single pipeline in the same process
+            summary_cmd = [
+                "python", "incr_summary.py",
+                "--input_csv", temp_batch_input,
+                "--output_dir", temp_summary_dir,
+                "--model_name", model_7b
             ]
-            if summary_files_in_final:
-                dfs = [pd.read_csv(f) for f in summary_files_in_final]
-                combined_df = pd.concat(dfs, ignore_index=True)
-                combined_df.to_csv(combined_summary_output, index=False)
-                logger.log(f"  ✓ Created combined summary for normalize: {combined_summary_output}")
-                summary_output = combined_summary_output
-            else:
+            
+            summary_success = run_command(summary_cmd, f"Summarize CMP Rank {cmp_rank}", fatal=False)
+            
+            # Move individual per-document summary files to final directory
+            # Track which files were moved for THIS rank to avoid pollution from other CMPs
+            summary_files_moved = 0
+            if summary_success:
+                for summary_file in os.listdir(temp_summary_dir):
+                    if summary_file.endswith("_summary.csv") and summary_file != "combined_summary.csv":
+                        # Extract doc_id from filename and rename
+                        doc_id = summary_file.replace("_summary.csv", "")
+                        src_path = os.path.join(temp_summary_dir, summary_file)
+                        dst_path = os.path.join(summary_dir, f"{doc_id}_summarized.csv")
+                        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                        shutil.move(src_path, dst_path)
+                        summary_files_moved += 1
+                        summary_files_moved_this_rank.append(dst_path)  # Track for THIS rank
+                
+                logger.log(f"  ✓ Moved {summary_files_moved} individual summary files to {summary_dir}")
+            
+            if summary_files_moved == 0:
+                logger.log(f"WARNING: No summary files moved to final directory", level="WARN")
                 summary_output = None
+            else:
+                # Create combined summary using ONLY files from this rank
+                # (NOT all files in summary_dir, to avoid pollution from other CMPs/parties)
+                if summary_files_moved_this_rank:
+                    dfs = [pd.read_csv(f) for f in summary_files_moved_this_rank]
+                    combined_df = pd.concat(dfs, ignore_index=True)
+                    combined_df.to_csv(combined_summary_output, index=False)
+                    logger.log(f"  ✓ Created combined summary for normalize: {combined_summary_output}")
+                    summary_output = combined_summary_output
+                    
+                    # Mark summarization stage as complete
+                    if "summarize" not in completed_stages[cmp_rank]:
+                        completed_stages[cmp_rank].append("summarize")
+                        logger.save_checkpoint(completed_stages)
+                        logger.log(f"  [CHECKPOINT] Rank {cmp_rank}: summarize completed")
+                else:
+                    summary_output = None
         
         # Step 4: Normalize (batch) - only run if we have both extract and summary outputs
         logger.log(f"\n[3/3] Normalization (batch of {num_included} debates)...")
@@ -615,40 +661,61 @@ def process_party_staged(
                     pass
             continue
         
-        temp_normalize_dir = os.path.join(".tmp_batch", f"normalize_cmp_{cmp_rank}")
-        os.makedirs(temp_normalize_dir, exist_ok=True)
-        
-        normalize_cmd = [
-            "python", "normalize.py",
-            "--claims_csv", extract_output,
-            "--debates_csv", temp_batch_input,
-            "--summaries_csv", summary_output,
-            "--output_dir", temp_normalize_dir,
-            "--party", party,
-            "--model_name", model_32b
-        ]
-        
-        normalize_success = run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}", fatal=False)
-        
-        # Find normalized output
-        normalize_output = find_latest_file(temp_normalize_dir, f"{party}_normalized") if normalize_success else None
-        
-        if not normalize_output:
-            logger.log(f"WARNING: no normalize output found in {temp_normalize_dir}", level="WARN")
-            stats["cmp_ranks_failed"] += 1
-            for temp_d in [temp_extract_dir, temp_summary_dir, temp_normalize_dir]:
-                try:
-                    if os.path.exists(temp_d):
-                        shutil.rmtree(temp_d)
-                except:
-                    pass
-            continue
-        
-        # Move normalize output to final directory immediately
+        # Check if normalization already completed
         normalized_final = os.path.join(normalize_dir, f"{party}_cmp_{cmp_rank}_normalized.csv")
-        os.makedirs(os.path.dirname(normalized_final), exist_ok=True)
-        shutil.move(normalize_output, normalized_final)
-        logger.log(f"  ✓ Moved to final: {normalized_final}")
+        if "normalize" in completed_stages.get(cmp_rank, []) and os.path.exists(normalized_final):
+            logger.log(f"  [SKIPPED] Normalization already completed, loading from: {normalized_final}")
+        else:
+            # Run normalization
+            os.makedirs(temp_normalize_dir, exist_ok=True)
+            
+            normalize_cmd = [
+                "python", "normalize.py",
+                "--claims_csv", extract_output,
+                "--debates_csv", temp_batch_input,
+                "--summaries_csv", summary_output,
+                "--output_dir", temp_normalize_dir,
+                "--party", party,
+                "--model_name", model_32b
+            ]
+            
+            normalize_success = run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}", fatal=False)
+            
+            # Find normalized output
+            normalize_output = find_latest_file(temp_normalize_dir, f"{party}_normalized") if normalize_success else None
+            
+            if not normalize_output:
+                logger.log(f"WARNING: no normalize output found in {temp_normalize_dir}", level="WARN")
+                stats["cmp_ranks_failed"] += 1
+                for temp_d in [temp_extract_dir, temp_summary_dir, temp_normalize_dir]:
+                    try:
+                        if os.path.exists(temp_d):
+                            shutil.rmtree(temp_d)
+                    except:
+                        pass
+                continue
+            
+            # Move normalize output to final directory immediately
+            os.makedirs(os.path.dirname(normalized_final), exist_ok=True)
+            shutil.move(normalize_output, normalized_final)
+            logger.log(f"  ✓ Moved to final: {normalized_final}")
+            
+            # Mark normalization stage as complete
+            if "normalize" not in completed_stages[cmp_rank]:
+                completed_stages[cmp_rank].append("normalize")
+                logger.save_checkpoint(completed_stages)
+                logger.log(f"  [CHECKPOINT] Rank {cmp_rank}: normalize completed")
+        
+        logger.log(f"SUCCESS: CMP Rank {cmp_rank} pipeline fully completed")
+        stats["cmp_ranks_completed"] += 1
+        
+        # Cleanup temporary directories
+        for temp_d in [temp_extract_dir, temp_summary_dir, temp_normalize_dir]:
+            try:
+                if os.path.exists(temp_d):
+                    shutil.rmtree(temp_d)
+            except:
+                pass
     
     # Final summary
     logger.log(f"\n{'='*80}")

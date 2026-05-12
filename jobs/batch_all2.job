@@ -1,0 +1,21 @@
+#!/bin/bash
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=batch_2
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=16:00:00
+#SBATCH --output=slurm_output/batch_2_%A.out
+
+module load 2025
+module load Anaconda3/2025.06-1
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+
+python orchestrate_pipeline.py \
+  --mode sequential \
+  --model_7b Qwen/Qwen2.5-7B-Instruct \
+  --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
+  --parties "PVDA,PVDD,PVV,SGP,SP" \
+  --resume

@@ -15,5 +15,6 @@ conda activate /scratch-shared/lsaleh/.conda/envs/thesis
 
 python batch_party.py \
 --party VVD \
+--resume \
 --model_7b /scratch-shared/lsaleh/models/Qwen2.5-7B-Instruct \
 --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct

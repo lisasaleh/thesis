@@ -25,6 +25,7 @@ import argparse
 import json
 import glob
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Set
@@ -489,9 +490,10 @@ def process_party_staged(
         
         stats["cmp_ranks_processed"] += 1
         
-        # Step 1: Build batch input CSV
-        temp_batch_input = os.path.join(".tmp_batch", f"{party}_cmp_rank_{cmp_rank}_input.csv")
-        os.makedirs(os.path.dirname(temp_batch_input), exist_ok=True)
+        # Step 1: Build batch input CSV in durable location (extract_dir)
+        batch_input_dir = os.path.join(extract_dir, "batch_inputs")
+        os.makedirs(batch_input_dir, exist_ok=True)
+        temp_batch_input = os.path.join(batch_input_dir, f"{party}_cmp_{cmp_rank}_input.csv")
         
         num_included, num_skipped = build_cmp_batch_input_csv(
             party, cmp_info, debate_ids, debates_csv, data_dir,
@@ -536,6 +538,12 @@ def process_party_staged(
             extract_output = None  # Will skip normalization
         else:
             logger.log(f"  ✓ Found extraction output: {extract_output}")
+            # Move extract output to final directory immediately
+            extracted_final = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
+            os.makedirs(os.path.dirname(extracted_final), exist_ok=True)
+            shutil.move(extract_output, extracted_final)
+            logger.log(f"  ✓ Moved to final: {extracted_final}")
+            extract_output = extracted_final
         
         # Step 3: Summarize (batch) - load model ONCE for all debates
         logger.log(f"\n[2/3] Summarization (batch of {num_included} debates)...")
@@ -554,16 +562,43 @@ def process_party_staged(
         
         summary_success = run_command(summary_cmd, f"Summarize CMP Rank {cmp_rank}", fatal=False)
         
-        # Concatenate all per-document summary files into one combined summary CSV
-        combined_summary_output = os.path.join(temp_summary_dir, "combined_summary.csv")
-        summary_concat_success = concatenate_summary_csvs(temp_summary_dir, combined_summary_output)
+        # Move individual per-document summary files to final directory
+        # (Don't concatenate - summaries are document-level, not party/rank-specific)
+        summary_files_moved = 0
+        if summary_success:
+            for summary_file in os.listdir(temp_summary_dir):
+                if summary_file.endswith("_summary.csv") and summary_file != "combined_summary.csv":
+                    # Extract doc_id from filename and rename
+                    doc_id = summary_file.replace("_summary.csv", "")
+                    src_path = os.path.join(temp_summary_dir, summary_file)
+                    dst_path = os.path.join(summary_dir, f"{doc_id}_summarized.csv")
+                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                    shutil.move(src_path, dst_path)
+                    summary_files_moved += 1
+            
+            logger.log(f"  ✓ Moved {summary_files_moved} individual summary files to {summary_dir}")
         
-        if not summary_concat_success:
-            logger.log(f"WARNING: Failed to concatenate summary files in {temp_summary_dir}", level="WARN")
+        if summary_files_moved == 0:
+            logger.log(f"WARNING: No summary files moved to final directory", level="WARN")
             summary_output = None
         else:
-            logger.log(f"  ✓ Combined {len([f for f in os.listdir(temp_summary_dir) if 'summary.csv' in f])} summary files: {combined_summary_output}")
-            summary_output = combined_summary_output
+            # Create combined summary in durable location for normalization
+            combined_summary_output = os.path.join(
+                summary_dir, f"{party}_cmp_{cmp_rank}_combined_summary_for_normalize.csv"
+            )
+            summary_files_in_final = [
+                os.path.join(summary_dir, f) 
+                for f in os.listdir(summary_dir) 
+                if f.endswith("_summarized.csv")
+            ]
+            if summary_files_in_final:
+                dfs = [pd.read_csv(f) for f in summary_files_in_final]
+                combined_df = pd.concat(dfs, ignore_index=True)
+                combined_df.to_csv(combined_summary_output, index=False)
+                logger.log(f"  ✓ Created combined summary for normalize: {combined_summary_output}")
+                summary_output = combined_summary_output
+            else:
+                summary_output = None
         
         # Step 4: Normalize (batch) - only run if we have both extract and summary outputs
         logger.log(f"\n[3/3] Normalization (batch of {num_included} debates)...")
@@ -574,7 +609,6 @@ def process_party_staged(
             # Cleanup
             for temp_d in [temp_extract_dir, temp_summary_dir]:
                 try:
-                    import shutil
                     if os.path.exists(temp_d):
                         shutil.rmtree(temp_d)
                 except:
@@ -604,49 +638,17 @@ def process_party_staged(
             stats["cmp_ranks_failed"] += 1
             for temp_d in [temp_extract_dir, temp_summary_dir, temp_normalize_dir]:
                 try:
-                    import shutil
                     if os.path.exists(temp_d):
                         shutil.rmtree(temp_d)
                 except:
                     pass
             continue
         
-        # Step 5: Move outputs to final directories
-        logger.log(f"\nMoving outputs to final directories...")
-        
-        # Move extracted
-        if extract_output:
-            extracted_final = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
-            os.makedirs(os.path.dirname(extracted_final), exist_ok=True)
-            os.replace(extract_output, extracted_final)
-            logger.log(f"  → {extracted_final}")
-        
-        # Move summary
-        if summary_output:
-            summary_final = os.path.join(summary_dir, f"{party}_cmp_{cmp_rank}_summary.csv")
-            os.makedirs(os.path.dirname(summary_final), exist_ok=True)
-            os.replace(summary_output, summary_final)
-            logger.log(f"  → {summary_final}")
-        
-        # Move normalized
+        # Move normalize output to final directory immediately
         normalized_final = os.path.join(normalize_dir, f"{party}_cmp_{cmp_rank}_normalized.csv")
         os.makedirs(os.path.dirname(normalized_final), exist_ok=True)
-        os.replace(normalize_output, normalized_final)
-        logger.log(f"  → {normalized_final}")
-        
-        logger.log(f"SUCCESS: CMP Rank {cmp_rank} pipeline completed")
-        completed_ranks.add(cmp_rank)
-        stats["cmp_ranks_completed"] += 1
-        logger.save_checkpoint(completed_ranks)
-        
-        # Cleanup temp directories for this CMP
-        for temp_d in [temp_extract_dir, temp_summary_dir, temp_normalize_dir]:
-            try:
-                import shutil
-                if os.path.exists(temp_d):
-                    shutil.rmtree(temp_d)
-            except:
-                pass
+        shutil.move(normalize_output, normalized_final)
+        logger.log(f"  ✓ Moved to final: {normalized_final}")
     
     # Final summary
     logger.log(f"\n{'='*80}")

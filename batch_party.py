@@ -681,8 +681,14 @@ def process_party_staged(
             
             normalize_success = run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}", fatal=False)
             
-            # Find normalized output
-            normalize_output = find_latest_file(temp_normalize_dir, f"{party}_normalized") if normalize_success else None
+            # Find normalized output (points file only)
+            normalize_output = (
+                os.path.join(temp_normalize_dir, f"{party}_normalized.csv")
+                if normalize_success
+                else None
+            )
+            if normalize_output and not os.path.exists(normalize_output):
+                normalize_output = None
             
             if not normalize_output:
                 logger.log(f"WARNING: no normalize output found in {temp_normalize_dir}", level="WARN")

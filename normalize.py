@@ -20,6 +20,91 @@ def safe_to_csv(df: pd.DataFrame, path: str):
     df.to_csv(path, index=False)
 
 
+def empty_records_columns(args) -> list[str]:
+    """Columns expected in the detailed normalization output."""
+    return [
+        args.doc_id_col,
+        args.order_col,
+        args.party_col,
+        args.speaker_col,
+        args.speaker_label_col,
+        args.claim_idx_col,
+        args.quote_col,
+        "normalization_raw",
+        "normalization_json",
+        "point",
+    ]
+
+
+def empty_points_columns() -> list[str]:
+    """Columns expected in the flattened point output."""
+    return [
+        "document_id",
+        "intervention_id",
+        "party",
+        "speaker",
+        "speaker_label",
+        "claim_idx",
+        "quote",
+        "point",
+    ]
+
+
+def read_csv_or_empty(path: str, label: str, required: bool = True) -> pd.DataFrame:
+    """Read a CSV without allowing empty/missing files to crash the pipeline."""
+    if not path or not os.path.exists(path):
+        msg = f"[WARN] {label} CSV not found: {path}"
+        if required:
+            print(msg + " | using empty DataFrame", flush=True)
+        return pd.DataFrame()
+
+    if os.path.getsize(path) == 0:
+        print(f"[WARN] {label} CSV is empty: {path} | using empty DataFrame", flush=True)
+        return pd.DataFrame()
+
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        print(f"[WARN] {label} CSV has no parseable columns: {path} | using empty DataFrame", flush=True)
+        return pd.DataFrame()
+    except Exception as e:
+        if required:
+            print(f"[ERROR] Could not read {label} CSV: {path} | {e} | using empty DataFrame", flush=True)
+            return pd.DataFrame()
+        print(f"[WARN] Could not read optional {label} CSV: {path} | {e} | using empty DataFrame", flush=True)
+        return pd.DataFrame()
+
+
+def ensure_columns(df: pd.DataFrame, columns: list[str], label: str) -> pd.DataFrame:
+    """Ensure required columns exist so downstream code can continue safely."""
+    if df.empty and len(df.columns) == 0:
+        return pd.DataFrame(columns=columns)
+
+    for col in columns:
+        if col not in df.columns:
+            print(f"[WARN] {label} missing column '{col}' | filling with empty strings", flush=True)
+            df[col] = ""
+    return df
+
+
+def write_empty_outputs(output_csv: str, output_points_csv: str, args, reason: str) -> None:
+    """Write valid empty outputs so the parent pipeline can continue."""
+    print(f"[WARN] No normalization performed: {reason}", flush=True)
+    safe_to_csv(pd.DataFrame(columns=empty_records_columns(args)), output_csv)
+    safe_to_csv(pd.DataFrame(columns=empty_points_columns()), output_points_csv)
+    print(
+        f"[DEBUG] Wrote empty normalized outputs: records={output_csv} | points={output_points_csv}",
+        flush=True,
+    )
+
+
+def first_row(obj):
+    """Return a Series when lookup returns duplicate rows as a DataFrame."""
+    if isinstance(obj, pd.DataFrame):
+        return obj.iloc[0]
+    return obj
+
+
 def flatten_normalized_row(row_dict, parsed_output, args):
     point = parsed_output.get("point", "").strip()
 
@@ -33,7 +118,7 @@ def flatten_normalized_row(row_dict, parsed_output, args):
         "speaker": row_dict.get(args.speaker_col),
         "speaker_label": row_dict.get(args.speaker_label_col),
         "claim_idx": row_dict.get(args.claim_idx_col),
-        "quote": row_dict.get("quote", ""),
+        "quote": row_dict.get(args.quote_col, ""),
         "point": point,
     }]
 
@@ -135,17 +220,37 @@ def main():
     output_csv = os.path.join(args.output_dir, f"{args.party}_normalized_records{timestamp_str}.csv")
     output_points_csv = os.path.join(args.output_dir, f"{args.party}_normalized{timestamp_str}.csv")
 
-    claims_df = pd.read_csv(args.claims_csv)
-    debates_df = pd.read_csv(args.debates_csv)
-    summaries_df = pd.read_csv(args.summaries_csv)
-    if args.summary_col not in summaries_df.columns:
-        raise ValueError(
-            f"Summary column '{args.summary_col}' not found. "
-            f"Available columns: {list(summaries_df.columns)}"
-        )
+    claims_df = read_csv_or_empty(args.claims_csv, "claims")
+    debates_df = read_csv_or_empty(args.debates_csv, "debates")
+    summaries_df = read_csv_or_empty(args.summaries_csv, "summaries", required=False)
 
-    debates_df = debates_df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
-    summaries_df = summaries_df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
+    required_claim_cols = [args.doc_id_col, args.order_col, args.quote_col]
+    required_debate_cols = [args.doc_id_col, args.order_col, args.text_col]
+    optional_claim_cols = [args.party_col, args.speaker_col, args.speaker_label_col, args.claim_idx_col]
+    optional_debate_cols = [args.party_col, args.speaker_col]
+    required_summary_cols = [args.doc_id_col, args.order_col, args.summary_col]
+
+    claims_df = ensure_columns(claims_df, required_claim_cols + optional_claim_cols, "claims")
+    debates_df = ensure_columns(debates_df, required_debate_cols + optional_debate_cols, "debates")
+    summaries_df = ensure_columns(summaries_df, required_summary_cols, "summaries")
+
+    if claims_df.empty:
+        write_empty_outputs(output_csv, output_points_csv, args, "claims CSV is empty or unreadable")
+        return
+
+    if debates_df.empty:
+        print("[WARN] debates CSV is empty or unreadable | all claims will be saved with empty points", flush=True)
+
+    # Coerce order IDs to numeric when possible, but do not crash on mixed types.
+    for df_name, df in [("claims", claims_df), ("debates", debates_df), ("summaries", summaries_df)]:
+        if args.order_col in df.columns:
+            df[args.order_col] = pd.to_numeric(df[args.order_col], errors="ignore")
+
+    sort_cols = [args.doc_id_col, args.order_col]
+    if not debates_df.empty:
+        debates_df = debates_df.sort_values(sort_cols).reset_index(drop=True)
+    if not summaries_df.empty:
+        summaries_df = summaries_df.sort_values(sort_cols).reset_index(drop=True)
 
     print("[DEBUG] Starting model load...", flush=True)
     llm = LocalLLM(args.model_name)
@@ -156,13 +261,16 @@ def main():
 
     start_idx = 0
     if args.resume and os.path.exists(output_csv):
-        done_df = pd.read_csv(output_csv)
-        processed_records = done_df.to_dict("records")
-        start_idx = len(done_df)
-        print(f"[DEBUG] Resume enabled | start_idx={start_idx}", flush=True)
+        done_df = read_csv_or_empty(output_csv, "existing normalized records", required=False)
+        if not done_df.empty:
+            processed_records = done_df.to_dict("records")
+            start_idx = min(len(done_df), len(claims_df))
+            print(f"[DEBUG] Resume enabled | start_idx={start_idx}", flush=True)
+        else:
+            print("[WARN] Resume requested but existing output is empty/unreadable | starting from row 0", flush=True)
 
-    debates_lookup = debates_df.set_index([args.doc_id_col, args.order_col])
-    summaries_lookup = summaries_df.set_index([args.doc_id_col, args.order_col])
+    debates_lookup = debates_df.set_index([args.doc_id_col, args.order_col]) if not debates_df.empty else pd.DataFrame()
+    summaries_lookup = summaries_df.set_index([args.doc_id_col, args.order_col]) if not summaries_df.empty else pd.DataFrame()
 
     for i in tqdm(range(start_idx, len(claims_df)), total=len(claims_df) - start_idx):
         row = claims_df.iloc[i]
@@ -179,8 +287,16 @@ def main():
             processed_records.append(row_dict)
             continue
 
+        if debates_lookup.empty:
+            print(f"[ERROR] No debate lookup available for doc_id={doc_id}, intervention_id={intervention_id}", flush=True)
+            row_dict["normalization_raw"] = "ERROR: empty debate lookup"
+            row_dict["normalization_json"] = json.dumps({"point": ""}, ensure_ascii=False)
+            row_dict["point"] = ""
+            processed_records.append(row_dict)
+            continue
+
         try:
-            debate_row = debates_lookup.loc[(doc_id, intervention_id)]
+            debate_row = first_row(debates_lookup.loc[(doc_id, intervention_id)])
         except KeyError:
             print(f"[ERROR] Missing debate row for doc_id={doc_id}, intervention_id={intervention_id}", flush=True)
             row_dict["normalization_raw"] = "ERROR: missing debate row"
@@ -192,16 +308,15 @@ def main():
         # Format current intervention with speaker and party
         speaker = str(debate_row.get(args.speaker_col, "")).strip()
         party = str(debate_row.get(args.party_col, "")).strip()
-        intervention_text = str(debate_row[args.text_col]) if pd.notna(debate_row[args.text_col]) else ""
+        intervention_text = str(debate_row.get(args.text_col, "")) if pd.notna(debate_row.get(args.text_col, "")) else ""
         intervention = f"{speaker} ({party}): {intervention_text}"
         
         # Safely extract summary from lookup
         summary = ""
-        if (doc_id, intervention_id) in summaries_lookup.index:
-            summary_row = summaries_lookup.loc[(doc_id, intervention_id)]
-            if isinstance(summary_row, pd.DataFrame):
-                summary_row = summary_row.iloc[0]
-            summary = str(summary_row[args.summary_col]) if pd.notna(summary_row[args.summary_col]) else ""
+        if not summaries_lookup.empty and (doc_id, intervention_id) in summaries_lookup.index:
+            summary_row = first_row(summaries_lookup.loc[(doc_id, intervention_id)])
+            summary_value = summary_row.get(args.summary_col, "")
+            summary = str(summary_value) if pd.notna(summary_value) else ""
 
         previous_interventions = build_previous_interventions_text(
             debates_df=debates_df,
@@ -244,13 +359,25 @@ def main():
 
         # Incremental saving at checkpoints (safe for crashes)
         if (i + 1 - start_idx) % args.checkpoint_every == 0:
-            safe_to_csv(pd.DataFrame(processed_records), output_csv)
+            checkpoint_records_df = pd.DataFrame(processed_records)
+            checkpoint_points_df = pd.DataFrame(flattened_points)
+            if checkpoint_points_df.empty:
+                checkpoint_points_df = pd.DataFrame(columns=empty_points_columns())
+            safe_to_csv(checkpoint_records_df, output_csv)
             print(f"[DEBUG] Checkpoint saved at row {i+1}", flush=True)
-            safe_to_csv(pd.DataFrame(flattened_points), output_points_csv)
+            safe_to_csv(checkpoint_points_df, output_points_csv)
 
-    # Final save
-    safe_to_csv(pd.DataFrame(processed_records), output_csv)
-    safe_to_csv(pd.DataFrame(flattened_points), output_points_csv)
+    # Final save. Always write valid CSVs with headers, even when no points were produced.
+    records_df = pd.DataFrame(processed_records)
+    if records_df.empty:
+        records_df = pd.DataFrame(columns=empty_records_columns(args))
+
+    points_df = pd.DataFrame(flattened_points)
+    if points_df.empty:
+        points_df = pd.DataFrame(columns=empty_points_columns())
+
+    safe_to_csv(records_df, output_csv)
+    safe_to_csv(points_df, output_points_csv)
     print("[DEBUG] Normalization finished successfully.", flush=True)
 
 

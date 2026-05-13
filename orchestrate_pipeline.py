@@ -42,7 +42,7 @@ PARTIES = [
 class Orchestrator:
     """Orchestrate party-centric pipeline across multiple parties."""
     
-    def __init__(self, model_7b: str, model_32b: str, min_tokens: int = 300, data_dir: str = "/scratch-shared/lsaleh/debates/"):
+    def __init__(self, model_7b: str, model_32b: str, min_tokens: int = 100, data_dir: str = "/scratch-shared/lsaleh/debates/"):
         self.model_7b = model_7b
         self.model_32b = model_32b
         self.min_tokens = min_tokens
@@ -245,7 +245,7 @@ def parse_args():
                         help="32B model name")
     parser.add_argument("--data_dir", type=str, default="/scratch-shared/lsaleh/debates",
                         help="Path to debates root directory (default: /scratch-shared/lsaleh/debates)")
-    parser.add_argument("--min_tokens", type=int, default=300,
+    parser.add_argument("--min_tokens", type=int, default=100,
                         help="Minimum token threshold")
     parser.add_argument("--parties", type=str, default=None,
                         help="Comma-separated list of parties (default: all)")

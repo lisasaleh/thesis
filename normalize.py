@@ -1,6 +1,7 @@
 import os
 import json
 import argparse
+from pathlib import Path
 from datetime import datetime
 import pandas as pd
 from tqdm import tqdm
@@ -12,6 +13,12 @@ from prompts.normalize_prompt import (
     extract_json_with_basic_repair,
     validate_normalization_output,
 )
+
+def safe_to_csv(df: pd.DataFrame, path: str):
+    """Safely save a DataFrame, ensuring the parent directory exists."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+
 
 def flatten_normalized_row(row_dict, parsed_output, args):
     point = parsed_output.get("point", "").strip()
@@ -25,7 +32,7 @@ def flatten_normalized_row(row_dict, parsed_output, args):
         "party": row_dict.get(args.party_col),
         "speaker": row_dict.get(args.speaker_col),
         "speaker_label": row_dict.get(args.speaker_label_col),
-        "claim_idx": row_dict.get("claim_idx"),
+        "claim_idx": row_dict.get(args.claim_idx_col),
         "quote": row_dict.get("quote", ""),
         "point": point,
     }]
@@ -49,7 +56,7 @@ def parse_args():
     parser.add_argument("--claim_idx_col", type=str, default="claim_idx")
 
     parser.add_argument("--text_col", type=str, default="speech")
-    parser.add_argument("--summary_col", type=str, default="summary_before")
+    parser.add_argument("--summary_col", type=str, default="running_summary_after")
 
     parser.add_argument("--checkpoint_every", type=int, default=25)
     parser.add_argument("--resume", action="store_true")
@@ -131,6 +138,11 @@ def main():
     claims_df = pd.read_csv(args.claims_csv)
     debates_df = pd.read_csv(args.debates_csv)
     summaries_df = pd.read_csv(args.summaries_csv)
+    if args.summary_col not in summaries_df.columns:
+        raise ValueError(
+            f"Summary column '{args.summary_col}' not found. "
+            f"Available columns: {list(summaries_df.columns)}"
+        )
 
     debates_df = debates_df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
     summaries_df = summaries_df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
@@ -189,7 +201,7 @@ def main():
             summary_row = summaries_lookup.loc[(doc_id, intervention_id)]
             if isinstance(summary_row, pd.DataFrame):
                 summary_row = summary_row.iloc[0]
-            summary = str(summary_row["running_summary_after"]) if pd.notna(summary_row["running_summary_after"]) else ""
+            summary = str(summary_row[args.summary_col]) if pd.notna(summary_row[args.summary_col]) else ""
 
         previous_interventions = build_previous_interventions_text(
             debates_df=debates_df,
@@ -219,7 +231,6 @@ def main():
             raw_output = result["raw_model_output"]
         except Exception as e:
             print(f"[ERROR] Failed on row {i}: {e}", flush=True)
-            print(f"[DEBUG_RAW] Raw output was:\n{raw_output[:500]}\n", flush=True)
             parsed_output = {"point": ""}
             raw_output = f"ERROR: {str(e)}"
 
@@ -233,13 +244,13 @@ def main():
 
         # Incremental saving at checkpoints (safe for crashes)
         if (i + 1 - start_idx) % args.checkpoint_every == 0:
-            pd.DataFrame(processed_records).to_csv(output_csv, index=False)
+            safe_to_csv(pd.DataFrame(processed_records), output_csv)
             print(f"[DEBUG] Checkpoint saved at row {i+1}", flush=True)
-            pd.DataFrame(flattened_points).to_csv(output_points_csv, index=False)
+            safe_to_csv(pd.DataFrame(flattened_points), output_points_csv)
 
     # Final save
-    pd.DataFrame(processed_records).to_csv(output_csv, index=False)
-    pd.DataFrame(flattened_points).to_csv(output_points_csv, index=False)
+    safe_to_csv(pd.DataFrame(processed_records), output_csv)
+    safe_to_csv(pd.DataFrame(flattened_points), output_points_csv)
     print("[DEBUG] Normalization finished successfully.", flush=True)
 
 

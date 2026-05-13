@@ -17,5 +17,5 @@ python orchestrate_pipeline.py \
   --mode sequential \
   --model_7b Qwen/Qwen2.5-7B-Instruct \
   --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
-  --parties "PVDA,PVDD,PVV,SGP,SP" \
+  --parties "PVDA,PVDD,PVV,SGP" \
   --resume

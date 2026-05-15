@@ -9,7 +9,7 @@ from datetime import datetime
 import pandas as pd
 from tqdm import tqdm
 
-from llm_utils import LocalLLM, generate_json
+from llm_utils import add_backend_args, create_llm_from_args, generate_json_with_raw
 from prompts.extract_prompt import build_claim_extraction_prompt
 
 
@@ -31,6 +31,7 @@ def parse_args():
     parser.add_argument("--target_party", type=str, default=None, help="Party to filter for extraction (if None, processes all)")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
+    add_backend_args(parser)
 
     return parser.parse_args()
 
@@ -67,10 +68,11 @@ def extract_claims(llm, intervention_text: str):
     )
 
     # Increased token limit to handle longer extractions
-    parsed = generate_json(llm, prompt, max_new_tokens=1200)
+    raw_output, parsed = generate_json_with_raw(llm, prompt, max_new_tokens=1200, temperature=0.0)
     parsed = validate_claim_extraction_output(parsed)
 
     return {
+        "raw_model_output": raw_output,
         "model_output_json": json.dumps(parsed, ensure_ascii=False),
         "parsed_output": parsed,
     }
@@ -125,10 +127,7 @@ def main():
         print(f"[DEBUG] target_party={args.target_party}", flush=True)
         print(f"[DEBUG] unique parties in data={parties}", flush=True)
 
-    # Load model
-    print("[DEBUG] Starting model load...", flush=True)
-    llm = LocalLLM(args.model_name)
-    print("[DEBUG] Model load finished.", flush=True)
+    llm = create_llm_from_args(args)
 
     processed_records = []
     flattened_claims = []
@@ -192,6 +191,7 @@ def main():
                 intervention_text=text,
             )
             parsed_output = result["parsed_output"]
+            raw_model_output = result["raw_model_output"]
             model_output_json = result["model_output_json"]
 
         except Exception as e:
@@ -205,7 +205,7 @@ def main():
             continue
 
         # Store results
-        row_dict["claim_extraction_raw"] = model_output_json
+        row_dict["claim_extraction_raw"] = raw_model_output
         row_dict["claim_extraction_json"] = json.dumps(parsed_output, ensure_ascii=False)
         row_dict["n_claims"] = len(parsed_output.get("claims", []))
 

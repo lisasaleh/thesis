@@ -2,13 +2,184 @@ import json
 import os
 import re
 import sys
+import time
+import urllib.error
+import urllib.request
 import warnings
-from typing import Dict, Any
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
 import traceback
 
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+
+@dataclass
+class APIConfig:
+    base_url: str
+    model_name: str
+    api_key: str = "EMPTY"
+    max_tokens: int = 512
+    temperature: float = 0.0
+    timeout: float = 120.0
+    retries: int = 3
+    backoff: float = 2.0
+
+
+def _chat_completions_url(base_url: str) -> str:
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        return f"{base_url}/chat/completions"
+    return f"{base_url}/v1/chat/completions"
+
+
+def _extract_usage(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    usage = data.get("usage")
+    return usage if isinstance(usage, dict) else None
+
+
+def call_model(
+    prompt: str,
+    system_prompt: str = None,
+    *,
+    backend: str = "local",
+    local_llm: "LocalLLM" = None,
+    api_config: APIConfig = None,
+    max_tokens: int = 512,
+    temperature: float = 0.0,
+) -> str:
+    """
+    Shared model call wrapper for local HuggingFace inference and vLLM's
+    OpenAI-compatible chat completions API.
+    """
+    if backend == "local":
+        if local_llm is None:
+            raise ValueError("local backend requires local_llm")
+        return local_llm.generate(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_new_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    if backend != "api":
+        raise ValueError(f"Unknown backend: {backend}")
+    if api_config is None:
+        raise ValueError("api backend requires api_config")
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    payload = {
+        "model": api_config.model_name,
+        "messages": messages,
+        "max_tokens": max_tokens if max_tokens is not None else api_config.max_tokens,
+        "temperature": temperature if temperature is not None else api_config.temperature,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_config.api_key or 'EMPTY'}",
+    }
+    url = _chat_completions_url(api_config.base_url)
+
+    last_error = None
+    for attempt in range(1, api_config.retries + 1):
+        request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=api_config.timeout) as response:
+                response_body = response.read().decode("utf-8")
+            data = json.loads(response_body)
+            usage = _extract_usage(data)
+            if usage:
+                print(f"[DEBUG] API token usage: {usage}", file=sys.stderr, flush=True)
+            choices = data.get("choices", [])
+            if not choices:
+                raise RuntimeError(f"API response did not include choices: {response_body[:500]}")
+            message = choices[0].get("message", {})
+            content = message.get("content", "")
+            return str(content).strip()
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last_error = e
+            if attempt >= api_config.retries:
+                raise RuntimeError(
+                    f"API server unreachable at {url} after {api_config.retries} attempts: {e}"
+                ) from e
+        except Exception as e:
+            last_error = e
+            if attempt >= api_config.retries:
+                raise RuntimeError(f"API call failed after {api_config.retries} attempts: {e}") from e
+
+        sleep_for = api_config.backoff * (2 ** (attempt - 1))
+        print(
+            f"[WARN] API call failed on attempt {attempt}/{api_config.retries}: {last_error}; retrying in {sleep_for:.1f}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        time.sleep(sleep_for)
+
+    raise RuntimeError(f"API call failed: {last_error}")
+
+
+class APILLM:
+    def __init__(self, config: APIConfig):
+        self.config = config
+        self.model_name = config.model_name
+
+    def generate(
+        self,
+        prompt: str,
+        system_prompt: str = None,
+        max_new_tokens: int = 512,
+        temperature: float = 0.0,
+    ) -> str:
+        return call_model(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            backend="api",
+            api_config=self.config,
+            max_tokens=max_new_tokens,
+            temperature=temperature,
+        )
+
+
+def add_backend_args(parser):
+    parser.add_argument("--backend", choices=["local", "api"], default=os.environ.get("LLM_BACKEND", "local"))
+    parser.add_argument("--api_base_url", type=str, default=os.environ.get("LLM_API_BASE_URL", "http://127.0.0.1:8000/v1"))
+    parser.add_argument("--api_model_name", type=str, default=os.environ.get("LLM_API_MODEL_NAME"))
+    parser.add_argument("--api_key", type=str, default=os.environ.get("LLM_API_KEY", "EMPTY"))
+    parser.add_argument("--api_max_tokens", type=int, default=int(os.environ.get("LLM_API_MAX_TOKENS", "1200")))
+    parser.add_argument("--api_temperature", type=float, default=float(os.environ.get("LLM_API_TEMPERATURE", "0")))
+    parser.add_argument("--api_timeout", type=float, default=float(os.environ.get("LLM_API_TIMEOUT", "120")))
+    parser.add_argument("--api_retries", type=int, default=int(os.environ.get("LLM_API_RETRIES", "3")))
+    parser.add_argument("--api_backoff", type=float, default=float(os.environ.get("LLM_API_BACKOFF", "2")))
+
+
+def create_llm_from_args(args):
+    if args.backend == "api":
+        model_name = args.api_model_name or args.model_name
+        print(
+            f"[DEBUG] Using API backend | base_url={args.api_base_url} | model={model_name}",
+            flush=True,
+        )
+        return APILLM(APIConfig(
+            base_url=args.api_base_url,
+            model_name=model_name,
+            api_key=args.api_key,
+            max_tokens=args.api_max_tokens,
+            temperature=args.api_temperature,
+            timeout=args.api_timeout,
+            retries=args.api_retries,
+            backoff=args.api_backoff,
+        ))
+
+    print("[DEBUG] Starting model load...", flush=True)
+    llm = LocalLLM(args.model_name)
+    print("[DEBUG] Model load finished.", flush=True)
+    return llm
 
 class LocalLLM:
     def __init__(self, model_name: str):
@@ -369,12 +540,29 @@ Tekst:
 
 
 def generate_json(
-    llm: LocalLLM,
+    llm,
     prompt: str,
     system_prompt: str = None,
     max_new_tokens: int = 300,
     temperature: float = 0.0,
 ) -> Dict[str, Any]:
+    raw, parsed = generate_json_with_raw(
+        llm=llm,
+        prompt=prompt,
+        system_prompt=system_prompt,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+    )
+    return parsed
+
+
+def generate_json_with_raw(
+    llm,
+    prompt: str,
+    system_prompt: str = None,
+    max_new_tokens: int = 300,
+    temperature: float = 0.0,
+) -> tuple[str, Dict[str, Any]]:
     raw = llm.generate(
         prompt=prompt,
         system_prompt=system_prompt,
@@ -385,4 +573,4 @@ def generate_json(
     print("[DEBUG] Raw generation received", file=sys.stderr, flush=True)
 
     parsed = extract_json_with_repair(raw, llm=llm)
-    return parsed
+    return raw, parsed

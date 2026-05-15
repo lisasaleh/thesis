@@ -13,9 +13,54 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 
 conda activate /scratch-shared/lsaleh/.conda/envs/thesis
 
+MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
+SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"
+API_BASE_URL="http://127.0.0.1:8000/v1"
+API_KEY="EMPTY"
+PARTY_LIST="VVD"
+CMP_RANKS="1"
+
+python -m vllm.entrypoints.openai.api_server \
+  --model "$MODEL_PATH" \
+  --served-model-name "$SERVED_MODEL" \
+  --host 127.0.0.1 \
+  --port 8000 \
+  > slurm_output/vllm_${SLURM_JOB_ID}.log 2>&1 &
+
+VLLM_PID=$!
+trap 'kill ${VLLM_PID} 2>/dev/null || true' EXIT
+
+echo "Waiting for vLLM API server..."
+for i in $(seq 1 120); do
+  if curl -fsS "${API_BASE_URL}/models" >/dev/null 2>&1; then
+    echo "vLLM API server is ready"
+    break
+  fi
+  if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
+    echo "vLLM server exited before becoming ready"
+    tail -100 "slurm_output/vllm_${SLURM_JOB_ID}.log"
+    exit 1
+  fi
+  sleep 5
+done
+
+if ! curl -fsS "${API_BASE_URL}/models" >/dev/null 2>&1; then
+  echo "Timed out waiting for vLLM API server"
+  tail -100 "slurm_output/vllm_${SLURM_JOB_ID}.log"
+  exit 1
+fi
+
 python orchestrate_pipeline.py \
   --mode sequential \
-  --model_7b Qwen/Qwen2.5-7B-Instruct \
+  --model_7b "$MODEL_PATH" \
   --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
-  --parties "50PLUS,CDA,CU" \
+  --backend api \
+  --api_base_url "$API_BASE_URL" \
+  --api_model_name "$SERVED_MODEL" \
+  --api_key "$API_KEY" \
+  --api_temperature 0 \
+  --api_timeout 180 \
+  --parties "$PARTY_LIST" \
+  --cmp_ranks "$CMP_RANKS" \
+  --force \
   --resume

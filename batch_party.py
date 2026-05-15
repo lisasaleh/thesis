@@ -158,11 +158,19 @@ def find_debates_for_themes(
     """
     df = pd.read_csv(debates_csv)
     
-    # Filter rows where theme_id matches any in the themes list
-    matching = df[df["theme_id"].isin(themes)]
-    
     # Exclude debates with day_count == -1 (out of date range)
-    matching = matching[matching["day_count"] != -1]
+    df = df[df["day_count"] != -1]
+    
+    # Filter rows where theme_id contains any of the themes.
+    # theme_id may be ";;" delimited (e.g., "theme_0001;;theme_0002;;theme_0003")
+    # or single (e.g., "theme_0001")
+    def has_matching_theme(theme_str):
+        if pd.isna(theme_str) or not theme_str:
+            return False
+        debate_themes = [t.strip() for t in str(theme_str).split(";;")]
+        return any(t in themes for t in debate_themes)
+    
+    matching = df[df["theme_id"].apply(has_matching_theme)]
     
     debate_ids = sorted(matching["dc_identifier"].unique().tolist())
     
@@ -411,7 +419,18 @@ def process_party_staged(
     cmp_manifest_csv: str = "outputs/cmp_manifest.csv",
     data_dir: str = "/scratch-shared/lsaleh/debates/",
     resume: bool = False,
-    metadata_csv: str = "outputs/debate_cmp_metadata.csv"
+    metadata_csv: str = "outputs/debate_cmp_metadata.csv",
+    backend: str = "local",
+    api_base_url: str = "http://127.0.0.1:8000/v1",
+    api_model_name: str = None,
+    api_key: str = "EMPTY",
+    api_max_tokens: int = 1200,
+    api_temperature: float = 0.0,
+    api_timeout: float = 120.0,
+    api_retries: int = 3,
+    api_backoff: float = 2.0,
+    force: bool = False,
+    cmp_ranks: List[int] = None,
 ):
     """
     Process a single party through the STAGED pipeline.
@@ -428,6 +447,10 @@ def process_party_staged(
     logger.log(f"Starting STAGED pipeline for party: {party}")
     logger.log(f"  Model 7B: {model_7b}")
     logger.log(f"  Model 32B: {model_32b}")
+    logger.log(f"  Backend: {backend}")
+    if backend == "api":
+        logger.log(f"  API base URL: {api_base_url}")
+        logger.log(f"  API model: {api_model_name or model_7b}")
     logger.log(f"  Min tokens: {min_tokens}")
     logger.log(f"  Data directory: {data_dir}")
     
@@ -435,16 +458,17 @@ def process_party_staged(
     for d in [extract_dir, summary_dir, normalize_dir]:
         os.makedirs(d, exist_ok=True)
     
-    # Load checkpoint if resuming
-    completed_stages = {}
-    if resume:
-        completed_stages = logger.load_checkpoint()
-        if completed_stages:
-            logger.log(f"Resuming: Found completed stages for {len(completed_stages)} ranks")
-            for rank, stages in sorted(completed_stages.items()):
-                logger.log(f"  Rank {rank}: {', '.join(stages)}")
-        else:
-            logger.log(f"Resuming: No checkpoint found, starting fresh")
+    # Load checkpoints by default so completed outputs are not rerun accidentally.
+    completed_stages = {} if force else logger.load_checkpoint()
+    if force:
+        logger.log("Force enabled: ignoring completed-stage checkpoint and existing final outputs", level="WARN")
+    elif completed_stages:
+        action = "Resuming" if resume else "Found checkpoint"
+        logger.log(f"{action}: Found completed stages for {len(completed_stages)} ranks")
+        for rank, stages in sorted(completed_stages.items()):
+            logger.log(f"  Rank {rank}: {', '.join(stages)}")
+    elif resume:
+        logger.log("Resuming: No checkpoint found, starting fresh")
     
     # Load CMP manifest
     try:
@@ -455,8 +479,12 @@ def process_party_staged(
     
     # Get party's top 5 CMP codes
     cmp_codes = get_party_cmp_codes(cmp_manifest, party)
+    if cmp_ranks:
+        requested_ranks = set(cmp_ranks)
+        cmp_codes = [cmp_info for cmp_info in cmp_codes if cmp_info["rank"] in requested_ranks]
+
     if not cmp_codes:
-        logger.log(f"Party '{party}' not found in CMP manifest", level="ERROR")
+        logger.log(f"Party '{party}' not found in CMP manifest or no requested CMP ranks matched", level="ERROR")
         return
     
     logger.log(f"Found {len(cmp_codes)} CMP codes for {party}")
@@ -490,7 +518,17 @@ def process_party_staged(
             completed_stages[cmp_rank] = []
         
         # Skip if already fully completed
-        if set(completed_stages[cmp_rank]) >= {"extract", "summarize", "normalize"}:
+        existing_extract = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
+        existing_summary = os.path.join(summary_dir, f"{party}_cmp_{cmp_rank}_combined_summary_for_normalize.csv")
+        existing_normalized = os.path.join(normalize_dir, f"{party}_cmp_{cmp_rank}_normalized.csv")
+
+        if (
+            not force
+            and (
+                set(completed_stages[cmp_rank]) >= {"extract", "summarize", "normalize"}
+                or all(os.path.exists(p) for p in [existing_extract, existing_summary, existing_normalized])
+            )
+        ):
             logger.log(f"Skipping CMP Rank {cmp_rank}: already fully completed")
             continue
         
@@ -540,9 +578,12 @@ def process_party_staged(
         
         # Check if extraction already completed - if so, load from durable storage
         extracted_final = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
-        if "extract" in completed_stages.get(cmp_rank, []) and os.path.exists(extracted_final):
+        if not force and os.path.exists(extracted_final):
             logger.log(f"  [SKIPPED] Extraction already completed, loading from: {extracted_final}")
             extract_output = extracted_final
+            if "extract" not in completed_stages[cmp_rank]:
+                completed_stages[cmp_rank].append("extract")
+                logger.save_checkpoint(completed_stages)
         else:
             # Run extraction
             os.makedirs(temp_extract_dir, exist_ok=True)
@@ -556,8 +597,20 @@ def process_party_staged(
                 "--output_dir", temp_extract_dir,
                 "--party", party,
                 "--model_name", model_7b,
-                "--target_party", party
+                "--target_party", party,
+                "--backend", backend,
             ]
+            if backend == "api":
+                extract_cmd.extend([
+                    "--api_base_url", api_base_url,
+                    "--api_model_name", api_model_name or model_7b,
+                    "--api_key", api_key,
+                    "--api_max_tokens", str(api_max_tokens),
+                    "--api_temperature", str(api_temperature),
+                    "--api_timeout", str(api_timeout),
+                    "--api_retries", str(api_retries),
+                    "--api_backoff", str(api_backoff),
+                ])
             
             extract_success = run_command(extract_cmd, f"Extract CMP Rank {cmp_rank}", fatal=False)
             
@@ -592,6 +645,12 @@ def process_party_staged(
         if "summarize" in completed_stages.get(cmp_rank, []) and os.path.exists(combined_summary_output):
             logger.log(f"  [SKIPPED] Summarization already completed, loading from: {combined_summary_output}")
             summary_output = combined_summary_output
+        elif not force and os.path.exists(combined_summary_output):
+            logger.log(f"  [SKIPPED] Summarization output exists, loading from: {combined_summary_output}")
+            summary_output = combined_summary_output
+            if "summarize" not in completed_stages[cmp_rank]:
+                completed_stages[cmp_rank].append("summarize")
+                logger.save_checkpoint(completed_stages)
         else:
             # Run summarization
             os.makedirs(temp_summary_dir, exist_ok=True)
@@ -603,8 +662,20 @@ def process_party_staged(
                 "python", "incr_summary.py",
                 "--input_csv", temp_batch_input,
                 "--output_dir", temp_summary_dir,
-                "--model_name", model_7b
+                "--model_name", model_7b,
+                "--backend", backend,
             ]
+            if backend == "api":
+                summary_cmd.extend([
+                    "--api_base_url", api_base_url,
+                    "--api_model_name", api_model_name or model_7b,
+                    "--api_key", api_key,
+                    "--api_max_tokens", str(api_max_tokens),
+                    "--api_temperature", str(api_temperature),
+                    "--api_timeout", str(api_timeout),
+                    "--api_retries", str(api_retries),
+                    "--api_backoff", str(api_backoff),
+                ])
             
             summary_success = run_command(summary_cmd, f"Summarize CMP Rank {cmp_rank}", fatal=False)
             
@@ -663,8 +734,11 @@ def process_party_staged(
         
         # Check if normalization already completed
         normalized_final = os.path.join(normalize_dir, f"{party}_cmp_{cmp_rank}_normalized.csv")
-        if "normalize" in completed_stages.get(cmp_rank, []) and os.path.exists(normalized_final):
+        if not force and os.path.exists(normalized_final):
             logger.log(f"  [SKIPPED] Normalization already completed, loading from: {normalized_final}")
+            if "normalize" not in completed_stages[cmp_rank]:
+                completed_stages[cmp_rank].append("normalize")
+                logger.save_checkpoint(completed_stages)
         else:
             # Run normalization
             os.makedirs(temp_normalize_dir, exist_ok=True)
@@ -676,8 +750,20 @@ def process_party_staged(
                 "--summaries_csv", summary_output,
                 "--output_dir", temp_normalize_dir,
                 "--party", party,
-                "--model_name", model_32b
+                "--model_name", model_32b,
+                "--backend", backend,
             ]
+            if backend == "api":
+                normalize_cmd.extend([
+                    "--api_base_url", api_base_url,
+                    "--api_model_name", api_model_name or model_32b,
+                    "--api_key", api_key,
+                    "--api_max_tokens", str(api_max_tokens),
+                    "--api_temperature", str(api_temperature),
+                    "--api_timeout", str(api_timeout),
+                    "--api_retries", str(api_retries),
+                    "--api_backoff", str(api_backoff),
+                ])
             
             normalize_success = run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}", fatal=False)
             
@@ -753,8 +839,8 @@ def parse_args():
                         help="32B model name for normalize")
     
     # Thresholds
-    parser.add_argument("--min_tokens", type=int, default=100,
-                        help="Minimum word count threshold (default: 100)")
+    parser.add_argument("--min_tokens", type=int, default=30,
+                        help="Minimum word count threshold (lowered from 100 to allow more debates through filter)")
     
     # Directories
     parser.add_argument("--extract_dir", type=str, default="/scratch-shared/lsaleh/extracted",
@@ -773,12 +859,37 @@ def parse_args():
     # Control flags
     parser.add_argument("--resume", action="store_true",
                         help="Resume from last checkpoint")
+    parser.add_argument("--force", action="store_true",
+                        help="Rerun stages even when checkpoint/final outputs already exist")
+    parser.add_argument("--cmp_ranks", type=str, default=None,
+                        help="Comma-separated CMP ranks to process, e.g. '1' or '1,3,5'")
+    parser.add_argument("--backend", choices=["local", "api"], default=os.environ.get("LLM_BACKEND", "local"),
+                        help="Model backend: local transformers or OpenAI-compatible API")
+    parser.add_argument("--api_base_url", type=str, default=os.environ.get("LLM_API_BASE_URL", "http://127.0.0.1:8000/v1"),
+                        help="OpenAI-compatible API base URL")
+    parser.add_argument("--api_model_name", type=str, default=os.environ.get("LLM_API_MODEL_NAME"),
+                        help="Model name exposed by the API server")
+    parser.add_argument("--api_key", type=str, default=os.environ.get("LLM_API_KEY", "EMPTY"),
+                        help="API key for OpenAI-compatible server")
+    parser.add_argument("--api_max_tokens", type=int, default=int(os.environ.get("LLM_API_MAX_TOKENS", "1200")),
+                        help="Default API max_tokens setting")
+    parser.add_argument("--api_temperature", type=float, default=float(os.environ.get("LLM_API_TEMPERATURE", "0")),
+                        help="API temperature; keep 0 for reproducibility")
+    parser.add_argument("--api_timeout", type=float, default=float(os.environ.get("LLM_API_TIMEOUT", "120")),
+                        help="API request timeout in seconds")
+    parser.add_argument("--api_retries", type=int, default=int(os.environ.get("LLM_API_RETRIES", "3")),
+                        help="API retry attempts")
+    parser.add_argument("--api_backoff", type=float, default=float(os.environ.get("LLM_API_BACKOFF", "2")),
+                        help="Initial API retry backoff in seconds")
     
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    cmp_ranks = None
+    if args.cmp_ranks:
+        cmp_ranks = [int(item.strip()) for item in args.cmp_ranks.split(",") if item.strip()]
     
     process_party_staged(
         party=args.party,
@@ -792,6 +903,17 @@ def main():
         cmp_manifest_csv=args.cmp_manifest_csv,
         data_dir=args.data_dir,
         resume=args.resume,
+        backend=args.backend,
+        api_base_url=args.api_base_url,
+        api_model_name=args.api_model_name,
+        api_key=args.api_key,
+        api_max_tokens=args.api_max_tokens,
+        api_temperature=args.api_temperature,
+        api_timeout=args.api_timeout,
+        api_retries=args.api_retries,
+        api_backoff=args.api_backoff,
+        force=args.force,
+        cmp_ranks=cmp_ranks,
     )
 
 

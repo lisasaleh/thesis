@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 from tqdm import tqdm
 
-from llm_utils import LocalLLM
+from llm_utils import add_backend_args, create_llm_from_args
 from prompts.normalize_prompt import (
     NORMALIZATION_SYSTEM_PROMPT,
     build_normalization_prompt,
@@ -146,6 +146,7 @@ def parse_args():
     parser.add_argument("--checkpoint_every", type=int, default=25)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
+    add_backend_args(parser)
 
     return parser.parse_args()
 
@@ -176,7 +177,7 @@ def build_previous_interventions_text(
 
 
 def normalize_single_quote(
-    llm: LocalLLM,
+    llm,
     quote: str,
     intervention: str,
     summary: str,
@@ -252,9 +253,7 @@ def main():
     if not summaries_df.empty:
         summaries_df = summaries_df.sort_values(sort_cols).reset_index(drop=True)
 
-    print("[DEBUG] Starting model load...", flush=True)
-    llm = LocalLLM(args.model_name)
-    print("[DEBUG] Model load finished.", flush=True)
+    llm = create_llm_from_args(args)
 
     processed_records = []
     flattened_points = []

@@ -7,7 +7,7 @@ from datetime import datetime
 import pandas as pd
 from tqdm import tqdm
 
-from llm_utils import LocalLLM, generate_json
+from llm_utils import add_backend_args, create_llm_from_args, generate_json_with_raw
 from prompts.summary_prompt import build_incremental_summary_prompt
 
 
@@ -64,14 +64,14 @@ def validate_state(parsed: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def update_running_summary(
-    llm: LocalLLM,
+    llm,
     current_state: Optional[Dict[str, Any]],
     new_intervention_text: str,
     speaker: str,
     party: str,
     idx: int,
     max_words: int = 250,
-) -> Dict[str, Any]:
+) -> tuple[Dict[str, Any], str]:
     current_state_json = (
         json.dumps(current_state, ensure_ascii=False, indent=2)
         if current_state is not None
@@ -87,7 +87,7 @@ def update_running_summary(
         max_words=max_words,
     )
 
-    parsed = generate_json(
+    raw_output, parsed = generate_json_with_raw(
         llm=llm,
         prompt=prompt,
         max_new_tokens=700,
@@ -95,7 +95,7 @@ def update_running_summary(
     )
 
     parsed = validate_state(parsed)
-    return parsed
+    return parsed, raw_output
 
 
 def parse_args():
@@ -114,6 +114,7 @@ def parse_args():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--add_timestamp", action="store_true", help="Add timestamp to output filenames")
     parser.add_argument("--max_words", type=int, default=250)
+    add_backend_args(parser)
 
     return parser.parse_args()
 
@@ -146,9 +147,7 @@ def main():
     df = pd.read_csv(args.input_csv)
     df = df.sort_values([args.doc_id_col, args.order_col]).reset_index(drop=True)
 
-    print("[DEBUG] Starting model load...", flush=True)
-    llm = LocalLLM(args.model_name)
-    print("[DEBUG] Model load finished.", flush=True)
+    llm = create_llm_from_args(args)
 
     # Process each document separately
     unique_docs = df[args.doc_id_col].unique()
@@ -181,6 +180,7 @@ def main():
         # Process rows for this document
         for i in tqdm(range(start_idx, len(df_doc)), total=len(df_doc) - start_idx, desc=f"Doc {doc_id}"):
             row = df_doc.iloc[i]
+            raw_model_response = ""
             
             text = str(row[args.text_col]) if pd.notna(row[args.text_col]) else ""
             word_count = len(text.split())
@@ -199,7 +199,7 @@ def main():
 
             else:
                 try:
-                    result = update_running_summary(
+                    result, raw_model_response = update_running_summary(
                         llm=llm,
                         current_state=running_state,
                         new_intervention_text=text,
@@ -224,6 +224,7 @@ def main():
             record["state_before_json"] = state_before_json
             record["running_summary_after"] = running_summary_after
             record["raw_model_output"] = raw_output
+            record["raw_model_response"] = raw_model_response
             record["skipped"] = skipped
             record["word_count"] = word_count
 

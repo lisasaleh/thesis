@@ -42,13 +42,55 @@ PARTIES = [
 class Orchestrator:
     """Orchestrate party-centric pipeline across multiple parties."""
     
-    def __init__(self, model_7b: str, model_32b: str, min_tokens: int = 100, data_dir: str = "/scratch-shared/lsaleh/debates/"):
+    def __init__(
+        self,
+        model_7b: str,
+        model_32b: str,
+        min_tokens: int = 100,
+        data_dir: str = "/scratch-shared/lsaleh/debates/",
+        backend: str = "local",
+        api_base_url: str = "http://127.0.0.1:8000/v1",
+        api_model_name: Optional[str] = None,
+        api_key: str = "EMPTY",
+        api_max_tokens: int = 1200,
+        api_temperature: float = 0.0,
+        api_timeout: float = 120.0,
+        api_retries: int = 3,
+        api_backoff: float = 2.0,
+        cmp_ranks: Optional[str] = None,
+    ):
         self.model_7b = model_7b
         self.model_32b = model_32b
         self.min_tokens = min_tokens
         self.data_dir = data_dir
+        self.backend = backend
+        self.api_base_url = api_base_url
+        self.api_model_name = api_model_name
+        self.api_key = api_key
+        self.api_max_tokens = api_max_tokens
+        self.api_temperature = api_temperature
+        self.api_timeout = api_timeout
+        self.api_retries = api_retries
+        self.api_backoff = api_backoff
+        self.cmp_ranks = cmp_ranks
         self.log_file = f"orchestrator_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         self.results = {}
+
+    def backend_args(self) -> List[str]:
+        args = ["--backend", self.backend]
+        if self.backend == "api":
+            args.extend([
+                "--api_base_url", self.api_base_url,
+                "--api_key", self.api_key,
+                "--api_max_tokens", str(self.api_max_tokens),
+                "--api_temperature", str(self.api_temperature),
+                "--api_timeout", str(self.api_timeout),
+                "--api_retries", str(self.api_retries),
+                "--api_backoff", str(self.api_backoff),
+            ])
+            if self.api_model_name:
+                args.extend(["--api_model_name", self.api_model_name])
+        return args
     
     def log(self, message: str):
         """Log to file and stdout."""
@@ -107,7 +149,7 @@ class Orchestrator:
             self.log("\nValidation PASSED: All required files present")
             return True
     
-    def run_party_sequential(self, party: str, resume: bool = False) -> bool:
+    def run_party_sequential(self, party: str, resume: bool = False, force: bool = False) -> bool:
         """
         Run pipeline for a single party (blocking).
         
@@ -124,10 +166,14 @@ class Orchestrator:
             "--model_32b", self.model_32b,
             "--min_tokens", str(self.min_tokens),
             "--data_dir", self.data_dir
-        ]
+        ] + self.backend_args()
         
         if resume:
             cmd.append("--resume")
+        if force:
+            cmd.append("--force")
+        if self.cmp_ranks:
+            cmd.extend(["--cmp_ranks", self.cmp_ranks])
         
         try:
             result = subprocess.run(cmd, check=False, capture_output=False)
@@ -153,20 +199,20 @@ class Orchestrator:
             }
             return False
     
-    def run_party_parallel_worker(self, party: str, resume: bool, queue: Queue):
+    def run_party_parallel_worker(self, party: str, resume: bool, force: bool, queue: Queue):
         """Worker function for parallel execution."""
-        success = self.run_party_sequential(party, resume=resume)
+        success = self.run_party_sequential(party, resume=resume, force=force)
         queue.put((party, success))
     
-    def run_parties_sequential(self, parties: List[str], resume: bool = False):
+    def run_parties_sequential(self, parties: List[str], resume: bool = False, force: bool = False):
         """Run pipeline for multiple parties sequentially."""
         self.log(f"\nRunning {len(parties)} parties sequentially")
         
         for i, party in enumerate(parties, 1):
             self.log(f"\n[{i}/{len(parties)}] {party}")
-            self.run_party_sequential(party, resume=resume)
+            self.run_party_sequential(party, resume=resume, force=force)
     
-    def run_parties_parallel(self, parties: List[str], resume: bool = False, max_workers: int = 2):
+    def run_parties_parallel(self, parties: List[str], resume: bool = False, force: bool = False, max_workers: int = 2):
         """
         Run pipeline for multiple parties in parallel.
         
@@ -191,7 +237,7 @@ class Orchestrator:
             # Start new process
             p = Process(
                 target=self.run_party_parallel_worker,
-                args=(party, resume, queue)
+                args=(party, resume, force, queue)
             )
             p.start()
             processes.append(p)
@@ -245,8 +291,8 @@ def parse_args():
                         help="32B model name")
     parser.add_argument("--data_dir", type=str, default="/scratch-shared/lsaleh/debates",
                         help="Path to debates root directory (default: /scratch-shared/lsaleh/debates)")
-    parser.add_argument("--min_tokens", type=int, default=100,
-                        help="Minimum token threshold")
+    parser.add_argument("--min_tokens", type=int, default=30,
+                        help="Minimum token threshold (lowered from 100 to include more debates)")
     parser.add_argument("--parties", type=str, default=None,
                         help="Comma-separated list of parties (default: all)")
     parser.add_argument("--mode", type=str, default="sequential",
@@ -256,8 +302,22 @@ def parse_args():
                         help="Max parallel workers (only used in parallel mode)")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from checkpoints")
+    parser.add_argument("--force", action="store_true",
+                        help="Rerun completed batch_party stages")
+    parser.add_argument("--cmp_ranks", type=str, default=None,
+                        help="Comma-separated CMP ranks to process per party, e.g. '1' or '1,3,5'")
     parser.add_argument("--validate-only", action="store_true",
                         help="Only validate setup, don't run")
+    parser.add_argument("--backend", choices=["local", "api"], default=os.environ.get("LLM_BACKEND", "local"),
+                        help="Model backend: local transformers or OpenAI-compatible API")
+    parser.add_argument("--api_base_url", type=str, default=os.environ.get("LLM_API_BASE_URL", "http://127.0.0.1:8000/v1"))
+    parser.add_argument("--api_model_name", type=str, default=os.environ.get("LLM_API_MODEL_NAME"))
+    parser.add_argument("--api_key", type=str, default=os.environ.get("LLM_API_KEY", "EMPTY"))
+    parser.add_argument("--api_max_tokens", type=int, default=int(os.environ.get("LLM_API_MAX_TOKENS", "1200")))
+    parser.add_argument("--api_temperature", type=float, default=float(os.environ.get("LLM_API_TEMPERATURE", "0")))
+    parser.add_argument("--api_timeout", type=float, default=float(os.environ.get("LLM_API_TIMEOUT", "120")))
+    parser.add_argument("--api_retries", type=int, default=int(os.environ.get("LLM_API_RETRIES", "3")))
+    parser.add_argument("--api_backoff", type=float, default=float(os.environ.get("LLM_API_BACKOFF", "2")))
     
     return parser.parse_args()
 
@@ -283,7 +343,22 @@ def main():
         parties = PARTIES
     
     # Create orchestrator
-    orchestrator = Orchestrator(args.model_7b, args.model_32b, args.min_tokens, args.data_dir)
+    orchestrator = Orchestrator(
+        args.model_7b,
+        args.model_32b,
+        args.min_tokens,
+        args.data_dir,
+        backend=args.backend,
+        api_base_url=args.api_base_url,
+        api_model_name=args.api_model_name,
+        api_key=args.api_key,
+        api_max_tokens=args.api_max_tokens,
+        api_temperature=args.api_temperature,
+        api_timeout=args.api_timeout,
+        api_retries=args.api_retries,
+        api_backoff=args.api_backoff,
+        cmp_ranks=args.cmp_ranks,
+    )
     
     # Validate setup
     if not orchestrator.validate_setup():
@@ -291,9 +366,9 @@ def main():
     
     # Run pipeline
     if args.mode == "sequential":
-        orchestrator.run_parties_sequential(parties, resume=args.resume)
+        orchestrator.run_parties_sequential(parties, resume=args.resume, force=args.force)
     else:
-        orchestrator.run_parties_parallel(parties, resume=args.resume, max_workers=args.max_workers)
+        orchestrator.run_parties_parallel(parties, resume=args.resume, force=args.force, max_workers=args.max_workers)
     
     # Print summary
     orchestrator.print_summary()

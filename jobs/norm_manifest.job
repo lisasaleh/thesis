@@ -4,15 +4,44 @@
 #SBATCH --job-name=mani_norm
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=02:00:00
+#SBATCH --time=06:00:00
 #SBATCH --output=slurm_output/mani_norm_%A.out
+
+set -euo pipefail
 
 module purge
 module load 2025
 module load Anaconda3/2025.06-1
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+unset PYTHONHOME
+unset PYTHONPATH
+export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
+export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
+export TRANSFORMERS_CACHE="$HF_HOME"
+export HF_DATASETS_CACHE="$HF_HOME"
+
+conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+
+cd ~/thesis
+
+python -c "import sys, encodings; print(sys.executable); print('python encodings ok')"
+python -c "import torch, transformers; print(torch.__version__); print(torch.cuda.is_available()); print('torch/transformers ok')"
+
+echo "=========================================="
+echo "Normalizing manifesto for PvdA"
+echo "=========================================="
 
 srun python normalize_manifesto.py \
   --manifesto_dir data/manifesto \
   --output_dir outputs/manifesto \
-  --party all \
-  --model_name /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct
+  --party pvda \
+  --model_name /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
+  --top_codes 5 \
+  --batch_size 8 \
+  --checkpoint_every 50 \
+  --resume
+
+echo "=========================================="
+echo "PvdA manifesto normalization completed"
+echo "=========================================="

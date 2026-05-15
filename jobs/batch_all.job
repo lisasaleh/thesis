@@ -33,11 +33,12 @@ test -d "$ENV_PATH/lib/python3.10/encodings" || {
 set +u
 conda activate "$ENV_PATH"
 set -u
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
 cd ~/thesis
 
 python -c "import sys, encodings; print(sys.executable); print('python encodings ok')"
-python -c "import vllm; print('vllm import ok')"
+python -c "import scipy.optimize, vllm; print('scipy/vllm import ok')"
 
 MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
 SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"

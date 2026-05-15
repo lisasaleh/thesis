@@ -20,7 +20,9 @@ export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
 export TRANSFORMERS_CACHE="$HF_HOME"
 export HF_DATASETS_CACHE="$HF_HOME"
 
+set +u
 conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+set -u
 
 python -c "import torch, transformers, sentence_transformers; print(torch.__version__); print(torch.cuda.is_available()); print('ok')"
 python -c "from transformers import AutoModelForCausalLM; print('transformers torch backend ok')"

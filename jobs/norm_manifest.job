@@ -12,16 +12,27 @@ set -euo pipefail
 module purge
 module load 2025
 module load Anaconda3/2025.06-1
-source "$(conda info --base)/etc/profile.d/conda.sh"
 
 unset PYTHONHOME
 unset PYTHONPATH
+CONDA_BASE=/sw/arch/RHEL9/EB_production/2025/software/Anaconda3/2025.06-1
+ENV_PATH=/scratch-shared/lsaleh/.conda/envs/thesis
 export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
 export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
 export TRANSFORMERS_CACHE="$HF_HOME"
 export HF_DATASETS_CACHE="$HF_HOME"
 
-conda activate /scratch-shared/lsaleh/.conda/envs/thesis
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+
+test -d "$ENV_PATH/lib/python3.10/encodings" || {
+  echo "ERROR: $ENV_PATH is missing lib/python3.10/encodings."
+  echo "Run: sbatch jobs/fix_env.job"
+  exit 2
+}
+
+set +u
+conda activate "$ENV_PATH"
+set -u
 
 cd ~/thesis
 

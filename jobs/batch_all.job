@@ -21,6 +21,7 @@ export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
 export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
 export TRANSFORMERS_CACHE="$HF_HOME"
 export HF_DATASETS_CACHE="$HF_HOME"
+export VLLM_USE_V1=0
 
 source "$CONDA_BASE/etc/profile.d/conda.sh"
 
@@ -39,6 +40,7 @@ cd ~/thesis
 
 python -c "import sys, encodings; print(sys.executable); print('python encodings ok')"
 python -c "import scipy.optimize, vllm; print('scipy/vllm import ok')"
+echo "VLLM_USE_V1=$VLLM_USE_V1"
 
 MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
 SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"

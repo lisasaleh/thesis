@@ -36,12 +36,12 @@ set +u
 conda activate "$ENV_PATH"
 set -u
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-export PATH="$CONDA_PREFIX/bin:$PATH"
 
 # FlashInfer/vLLM JIT needs CUDA development headers such as curand.h.
 # Keep CUDA_HOME pointed at the CUDA module, not the conda environment.
 export CUDA_HOME="${EBROOTCUDA:-${CUDA_HOME:-/sw/arch/RHEL9/EB_production/2025/software/CUDA/12.8.0}}"
 export CUDA_PATH="$CUDA_HOME"
+export PATH="$CUDA_HOME/bin:$CONDA_PREFIX/bin:$PATH"
 export CPATH="$CUDA_HOME/targets/x86_64-linux/include:${CPATH:-}"
 export LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:${LIBRARY_PATH:-}"
 export LD_LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
@@ -73,6 +73,7 @@ API_BASE_URL="http://127.0.0.1:8000/v1"
 API_KEY="EMPTY"
 PARTY_LIST="VVD"
 CMP_RANKS="1"
+EXTRACT_MAX_NEW_TOKENS="900"
 
 python -m vllm.entrypoints.openai.api_server \
   --model "$MODEL_PATH" \
@@ -116,5 +117,6 @@ python orchestrate_pipeline.py \
   --api_timeout 180 \
   --parties "$PARTY_LIST" \
   --cmp_ranks "$CMP_RANKS" \
+  --extract_max_new_tokens "$EXTRACT_MAX_NEW_TOKENS" \
   --force \
   --resume

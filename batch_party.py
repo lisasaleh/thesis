@@ -431,6 +431,7 @@ def process_party_staged(
     api_backoff: float = 2.0,
     force: bool = False,
     cmp_ranks: List[int] = None,
+    extract_max_new_tokens: int = 1200,
 ):
     """
     Process a single party through the STAGED pipeline.
@@ -599,6 +600,7 @@ def process_party_staged(
                 "--model_name", model_7b,
                 "--target_party", party,
                 "--backend", backend,
+                "--extract_max_new_tokens", str(extract_max_new_tokens),
             ]
             if backend == "api":
                 extract_cmd.extend([
@@ -612,7 +614,16 @@ def process_party_staged(
                     "--api_backoff", str(api_backoff),
                 ])
             
-            extract_success = run_command(extract_cmd, f"Extract CMP Rank {cmp_rank}", fatal=False)
+            logger.log(
+                f"START OF EXTRACTION | party={party} | cmp_rank={cmp_rank} "
+                f"| cmp_code={cmp_info['cmp_code']} | model={model_7b} "
+                f"| backend={backend} | debates={num_included}"
+            )
+            extract_success = run_command(
+                extract_cmd,
+                f"Extraction on {party} CMP {cmp_rank} - {model_7b}",
+                fatal=False,
+            )
             
             # Find extracted output - if extraction failed, try to continue anyway
             extract_output = find_latest_file(temp_extract_dir, f"{party}_claims") if extract_success else None
@@ -677,7 +688,16 @@ def process_party_staged(
                     "--api_backoff", str(api_backoff),
                 ])
             
-            summary_success = run_command(summary_cmd, f"Summarize CMP Rank {cmp_rank}", fatal=False)
+            logger.log(
+                f"START OF SUMMARIZATION | party={party} | cmp_rank={cmp_rank} "
+                f"| cmp_code={cmp_info['cmp_code']} | model={model_7b} "
+                f"| backend={backend} | debates={num_included}"
+            )
+            summary_success = run_command(
+                summary_cmd,
+                f"Summarization on {party} CMP {cmp_rank} - {model_7b}",
+                fatal=False,
+            )
             
             # Move individual per-document summary files to final directory
             # Track which files were moved for THIS rank to avoid pollution from other CMPs
@@ -765,7 +785,22 @@ def process_party_staged(
                     "--api_backoff", str(api_backoff),
                 ])
             
-            normalize_success = run_command(normalize_cmd, f"Normalize CMP Rank {cmp_rank}", fatal=False)
+            try:
+                n_claims_for_normalize = len(pd.read_csv(extract_output))
+            except Exception:
+                n_claims_for_normalize = "unknown"
+
+            logger.log(
+                f"START OF NORMALIZATION | party={party} | cmp_rank={cmp_rank} "
+                f"| cmp_code={cmp_info['cmp_code']} | model={model_32b} "
+                f"| backend={backend} | debates={num_included} "
+                f"| claims={n_claims_for_normalize}"
+            )
+            normalize_success = run_command(
+                normalize_cmd,
+                f"Normalization on {party} CMP {cmp_rank} - {model_32b}",
+                fatal=False,
+            )
             
             # Find normalized output (points file only)
             normalize_output = (
@@ -863,6 +898,8 @@ def parse_args():
                         help="Rerun stages even when checkpoint/final outputs already exist")
     parser.add_argument("--cmp_ranks", type=str, default=None,
                         help="Comma-separated CMP ranks to process, e.g. '1' or '1,3,5'")
+    parser.add_argument("--extract_max_new_tokens", type=int, default=1200,
+                        help="Maximum new tokens for extraction JSON output")
     parser.add_argument("--backend", choices=["local", "api"], default=os.environ.get("LLM_BACKEND", "local"),
                         help="Model backend: local transformers or OpenAI-compatible API")
     parser.add_argument("--api_base_url", type=str, default=os.environ.get("LLM_API_BASE_URL", "http://127.0.0.1:8000/v1"),
@@ -914,6 +951,7 @@ def main():
         api_backoff=args.api_backoff,
         force=args.force,
         cmp_ranks=cmp_ranks,
+        extract_max_new_tokens=args.extract_max_new_tokens,
     )
 
 

@@ -58,6 +58,7 @@ class Orchestrator:
         api_retries: int = 3,
         api_backoff: float = 2.0,
         cmp_ranks: Optional[str] = None,
+        extract_max_new_tokens: int = 1200,
     ):
         self.model_7b = model_7b
         self.model_32b = model_32b
@@ -73,6 +74,7 @@ class Orchestrator:
         self.api_retries = api_retries
         self.api_backoff = api_backoff
         self.cmp_ranks = cmp_ranks
+        self.extract_max_new_tokens = extract_max_new_tokens
         self.log_file = f"orchestrator_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         self.results = {}
 
@@ -165,7 +167,8 @@ class Orchestrator:
             "--model_7b", self.model_7b,
             "--model_32b", self.model_32b,
             "--min_tokens", str(self.min_tokens),
-            "--data_dir", self.data_dir
+            "--data_dir", self.data_dir,
+            "--extract_max_new_tokens", str(self.extract_max_new_tokens),
         ] + self.backend_args()
         
         if resume:
@@ -306,6 +309,8 @@ def parse_args():
                         help="Rerun completed batch_party stages")
     parser.add_argument("--cmp_ranks", type=str, default=None,
                         help="Comma-separated CMP ranks to process per party, e.g. '1' or '1,3,5'")
+    parser.add_argument("--extract_max_new_tokens", type=int, default=int(os.environ.get("EXTRACT_MAX_NEW_TOKENS", "1200")),
+                        help="Maximum new tokens for extraction JSON output")
     parser.add_argument("--validate-only", action="store_true",
                         help="Only validate setup, don't run")
     parser.add_argument("--backend", choices=["local", "api"], default=os.environ.get("LLM_BACKEND", "local"),
@@ -358,6 +363,7 @@ def main():
         api_retries=args.api_retries,
         api_backoff=args.api_backoff,
         cmp_ranks=args.cmp_ranks,
+        extract_max_new_tokens=args.extract_max_new_tokens,
     )
     
     # Validate setup

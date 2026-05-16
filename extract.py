@@ -10,7 +10,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from llm_utils import add_backend_args, create_llm_from_args, generate_json_with_raw
-from prompts.extract_prompt import build_claim_extraction_prompt
+from prompts.extract_prompt import CLAIM_EXTRACTION_SYSTEM_PROMPT, build_claim_extraction_prompt
 
 
 def parse_args():
@@ -27,6 +27,12 @@ def parse_args():
     parser.add_argument("--order_col", type=str, default="intervention_id")
     parser.add_argument("--speaker_col", type=str, default="speaker")
     parser.add_argument("--speaker_label_col", type=str, default="speaker_label")
+    parser.add_argument(
+        "--extract_max_new_tokens",
+        type=int,
+        default=1200,
+        help="Maximum new tokens for claim extraction JSON.",
+    )
 
     parser.add_argument("--target_party", type=str, default=None, help="Party to filter for extraction (if None, processes all)")
     parser.add_argument("--resume", action="store_true")
@@ -58,7 +64,7 @@ def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:
     return {"claims": cleaned_claims}
 
 
-def extract_claims(llm, intervention_text: str):
+def extract_claims(llm, intervention_text: str, max_new_tokens: int):
     # Pre-process: escape problematic characters
     cleaned_text = intervention_text.replace('\n', ' ').replace('\t', ' ').replace('\r', ' ')
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
@@ -67,8 +73,15 @@ def extract_claims(llm, intervention_text: str):
         text=cleaned_text,
     )
 
-    # Increased token limit to handle longer extractions
-    raw_output, parsed = generate_json_with_raw(llm, prompt, max_new_tokens=1200, temperature=0.0)
+    # Long parliamentary interventions can contain many claims; tune this for
+    # the speed/completeness tradeoff in smoke tests versus full runs.
+    raw_output, parsed = generate_json_with_raw(
+        llm,
+        prompt,
+        system_prompt=CLAIM_EXTRACTION_SYSTEM_PROMPT,
+        max_new_tokens=max_new_tokens,
+        temperature=0.0,
+    )
     parsed = validate_claim_extraction_output(parsed)
 
     return {
@@ -189,6 +202,7 @@ def main():
             result = extract_claims(
                 llm,
                 intervention_text=text,
+                max_new_tokens=args.extract_max_new_tokens,
             )
             parsed_output = result["parsed_output"]
             raw_model_output = result["raw_model_output"]

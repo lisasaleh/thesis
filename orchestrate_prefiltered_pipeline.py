@@ -71,6 +71,7 @@ def party_cmd(args, party: str) -> list[str]:
         "--chunk_max_words", str(args.chunk_max_words),
         "--prefilter_top_k", str(args.prefilter_top_k),
         "--roberta_batch_size", str(args.roberta_batch_size),
+        "--roberta_device", args.roberta_device,
         "--roberta_model_name", args.roberta_model_name,
         "--roberta_tokenizer_name", args.roberta_tokenizer_name,
         "--force_stages", args.force_stages,
@@ -236,20 +237,21 @@ def parse_args():
     parser.add_argument("--chunk_max_words", type=int, default=1000)
     parser.add_argument("--prefilter_top_k", type=int, default=3)
     parser.add_argument("--roberta_batch_size", type=int, default=16)
+    parser.add_argument("--roberta_device", choices=["auto", "cpu", "cuda"], default="cpu")
     parser.add_argument("--roberta_model_name", default="manifesto-project/manifestoberta-xlm-roberta-56policy-topics-sentence-2024-1-1")
     parser.add_argument("--roberta_tokenizer_name", default="xlm-roberta-large")
     parser.add_argument("--final_cmp_recheck", action="store_true")
     parser.add_argument("--validation_mode", action="store_true")
     parser.add_argument("--validation_party", default="VVD")
     parser.add_argument("--validation_cmp_ranks", default="1")
-    parser.add_argument("--validation_report_csv", default="outputs/validation/prefilter_recall_report.csv")
-    parser.add_argument("--validation_old_extract_dir", default="outputs/validation/old/extracted")
-    parser.add_argument("--validation_old_summary_dir", default="outputs/validation/old/summaries")
-    parser.add_argument("--validation_old_normalize_dir", default="outputs/validation/old/normalized")
-    parser.add_argument("--validation_new_extract_dir", default="outputs/validation/new/extracted")
-    parser.add_argument("--validation_new_prefilter_dir", default="outputs/validation/new/prefiltered")
-    parser.add_argument("--validation_new_summary_dir", default="outputs/validation/new/summaries")
-    parser.add_argument("--validation_new_normalize_dir", default="outputs/validation/new/normalized")
+    parser.add_argument("--validation_report_csv", default="/scratch-shared/lsaleh/validation/prefilter_recall_report.csv")
+    parser.add_argument("--validation_old_extract_dir", default="/scratch-shared/lsaleh/validation/old/extracted")
+    parser.add_argument("--validation_old_summary_dir", default="/scratch-shared/lsaleh/validation/old/summaries")
+    parser.add_argument("--validation_old_normalize_dir", default="/scratch-shared/lsaleh/validation/old/normalized")
+    parser.add_argument("--validation_new_extract_dir", default="/scratch-shared/lsaleh/validation/new/extracted")
+    parser.add_argument("--validation_new_prefilter_dir", default="/scratch-shared/lsaleh/validation/new/prefiltered")
+    parser.add_argument("--validation_new_summary_dir", default="/scratch-shared/lsaleh/validation/new/summaries")
+    parser.add_argument("--validation_new_normalize_dir", default="/scratch-shared/lsaleh/validation/new/normalized")
     parser.add_argument("--backend", choices=["local", "api"], default=os.environ.get("LLM_BACKEND", "local"))
     parser.add_argument("--api_base_url", default=os.environ.get("LLM_API_BASE_URL", "http://127.0.0.1:8000/v1"))
     parser.add_argument("--api_model_name", default=os.environ.get("LLM_API_MODEL_NAME"))

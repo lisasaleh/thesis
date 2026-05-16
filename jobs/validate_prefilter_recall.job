@@ -45,10 +45,12 @@ SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"
 API_BASE_URL="http://127.0.0.1:8000/v1"
 API_KEY="EMPTY"
 VALIDATION_PARTY="${VALIDATION_PARTY:-VVD}"
-VALIDATION_CMP_RANKS="${VALIDATION_CMP_RANKS:-1}"
+VALIDATION_CMP_RANKS="${VALIDATION_CMP_RANKS:-2}"
 VALIDATION_FORCE="${VALIDATION_FORCE:-1}"
-EXTRACT_MAX_NEW_TOKENS="${EXTRACT_MAX_NEW_TOKENS:-1400}"
+EXTRACT_MAX_NEW_TOKENS="${EXTRACT_MAX_NEW_TOKENS:-2000}"
 EXTRACT_MAX_CLAIMS="${EXTRACT_MAX_CLAIMS:-15}"
+ROBERTA_DEVICE="${ROBERTA_DEVICE:-cpu}"
+SCRATCH_OUTPUT_ROOT="${SCRATCH_OUTPUT_ROOT:-/scratch-shared/lsaleh/validation_cmp2}"
 
 FORCE_ARGS=()
 if [ "$VALIDATION_FORCE" = "1" ]; then
@@ -90,4 +92,13 @@ python orchestrate_prefiltered_pipeline.py \
   --extract_max_new_tokens "$EXTRACT_MAX_NEW_TOKENS" \
   --extract_max_claims "$EXTRACT_MAX_CLAIMS" \
   --prefilter_top_k 3 \
+  --roberta_device "$ROBERTA_DEVICE" \
+  --validation_report_csv "$SCRATCH_OUTPUT_ROOT/prefilter_recall_report.csv" \
+  --validation_old_extract_dir "$SCRATCH_OUTPUT_ROOT/old/extracted" \
+  --validation_old_summary_dir "$SCRATCH_OUTPUT_ROOT/old/summaries" \
+  --validation_old_normalize_dir "$SCRATCH_OUTPUT_ROOT/old/normalized" \
+  --validation_new_extract_dir "$SCRATCH_OUTPUT_ROOT/new/extracted" \
+  --validation_new_prefilter_dir "$SCRATCH_OUTPUT_ROOT/new/prefiltered" \
+  --validation_new_summary_dir "$SCRATCH_OUTPUT_ROOT/new/summaries" \
+  --validation_new_normalize_dir "$SCRATCH_OUTPUT_ROOT/new/normalized" \
   "${FORCE_ARGS[@]}"

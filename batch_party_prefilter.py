@@ -284,6 +284,7 @@ def process_party_prefiltered(args) -> None:
                 "--batch_size", str(args.roberta_batch_size),
                 "--model_name", args.roberta_model_name,
                 "--tokenizer_name", args.roberta_tokenizer_name,
+                "--device", args.roberta_device,
             ]
             if force_stage(args, "prefilter"):
                 prefilter_cmd.append("--force")
@@ -432,6 +433,7 @@ def process_party_prefiltered(args) -> None:
                     "--batch_size", str(args.roberta_batch_size),
                     "--model_name", args.roberta_model_name,
                     "--tokenizer_name", args.roberta_tokenizer_name,
+                    "--device", args.roberta_device,
                 ]
                 if force_stage(args, "final_cmp_recheck"):
                     recheck_cmd.append("--force")
@@ -483,6 +485,7 @@ def parse_args():
     parser.add_argument("--chunk_max_words", type=int, default=1000)
     parser.add_argument("--prefilter_top_k", type=int, default=3)
     parser.add_argument("--roberta_batch_size", type=int, default=16)
+    parser.add_argument("--roberta_device", choices=["auto", "cpu", "cuda"], default="cpu")
     parser.add_argument("--roberta_model_name", default="manifesto-project/manifestoberta-xlm-roberta-56policy-topics-sentence-2024-1-1")
     parser.add_argument("--roberta_tokenizer_name", default="xlm-roberta-large")
     parser.add_argument("--final_cmp_recheck", action="store_true")

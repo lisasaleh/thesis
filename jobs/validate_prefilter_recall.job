@@ -38,7 +38,7 @@ export LD_LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:$CONDA_PREFIX/lib:${
 
 cd ~/thesis
 
-python -m py_compile extract.py cmp_roberta_prefilter.py batch_party_prefilter.py orchestrate_prefiltered_pipeline.py
+python -m py_compile llm_utils.py extract.py cmp_roberta_prefilter.py batch_party_prefilter.py orchestrate_prefiltered_pipeline.py
 
 MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
 SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"
@@ -46,6 +46,14 @@ API_BASE_URL="http://127.0.0.1:8000/v1"
 API_KEY="EMPTY"
 VALIDATION_PARTY="${VALIDATION_PARTY:-VVD}"
 VALIDATION_CMP_RANKS="${VALIDATION_CMP_RANKS:-1}"
+VALIDATION_FORCE="${VALIDATION_FORCE:-1}"
+EXTRACT_MAX_NEW_TOKENS="${EXTRACT_MAX_NEW_TOKENS:-1400}"
+EXTRACT_MAX_CLAIMS="${EXTRACT_MAX_CLAIMS:-15}"
+
+FORCE_ARGS=()
+if [ "$VALIDATION_FORCE" = "1" ]; then
+  FORCE_ARGS=(--force)
+fi
 
 python -m vllm.entrypoints.openai.api_server \
   --model "$MODEL_PATH" \
@@ -79,7 +87,7 @@ python orchestrate_prefiltered_pipeline.py \
   --api_temperature 0 \
   --api_timeout 180 \
   --min_tokens 100 \
-  --extract_max_new_tokens 900 \
-  --extract_max_claims 15 \
+  --extract_max_new_tokens "$EXTRACT_MAX_NEW_TOKENS" \
+  --extract_max_claims "$EXTRACT_MAX_CLAIMS" \
   --prefilter_top_k 3 \
-  --resume
+  "${FORCE_ARGS[@]}"

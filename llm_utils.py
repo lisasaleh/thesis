@@ -530,6 +530,11 @@ def extract_json_with_repair(text: str, llm: LocalLLM = None) -> Dict[str, Any]:
     if double_wrapped.startswith("{{") and double_wrapped.endswith("}}"):
         candidate = double_wrapped[1:-1].strip()
 
+    # Common Qwen failure mode for list items after prompts containing escaped
+    # JSON examples: {"claims": [{{"quote": "..."}}, ...]}.
+    candidate = re.sub(r"\{\{\s*\"quote\"\s*:", "{\"quote\":", candidate)
+    candidate = re.sub(r"\}\}\s*(?=,|\])", "}", candidate)
+
     # Attempt 1: direct parse
     try:
         return json.loads(candidate)

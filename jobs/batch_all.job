@@ -35,12 +35,25 @@ set +u
 conda activate "$ENV_PATH"
 set -u
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+export CUDA_HOME="$CONDA_PREFIX"
+export CUDA_PATH="$CONDA_PREFIX"
+export PATH="$CONDA_PREFIX/bin:$PATH"
 
 cd ~/thesis
 
 python -c "import sys, encodings; print(sys.executable); print('python encodings ok')"
 python -c "import scipy.optimize, vllm; print('scipy/vllm import ok')"
 echo "VLLM_USE_V1=$VLLM_USE_V1"
+if command -v nvcc >/dev/null 2>&1; then
+  nvcc --version
+else
+  echo "WARNING: nvcc not found. If vLLM uses FlashInfer JIT, run: sbatch jobs/fix_env.job"
+fi
+test -f "$CONDA_PREFIX/include/cuda_runtime.h" || {
+  echo "ERROR: cuda_runtime.h not found in $CONDA_PREFIX/include."
+  echo "Run: sbatch jobs/fix_env.job"
+  exit 3
+}
 
 MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
 SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"

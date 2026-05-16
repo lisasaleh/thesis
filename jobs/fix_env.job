@@ -16,6 +16,7 @@ ENV_PATH=/scratch-shared/lsaleh/.conda/envs/thesis
 
 "$CONDA_BASE/bin/python" -m conda install -y \
   -p "$ENV_PATH" \
+  --override-channels \
   -c conda-forge -c pytorch -c nvidia \
   python=3.10
 
@@ -28,7 +29,9 @@ test -d "$ENV_PATH/lib/python3.10/encodings" || {
 
 "$CONDA_BASE/bin/python" -m conda install -y \
   -p "$ENV_PATH" \
+  --override-channels \
   -c pytorch -c nvidia -c conda-forge \
-  pytorch=2.4.* pytorch-cuda=12.1
+  pytorch=2.4.* pytorch-cuda=12.1 cuda-nvcc=12.1
 
 "$ENV_PATH/bin/python" -c "import torch, transformers; print(torch.__version__); print(torch.cuda.is_available())"
+"$ENV_PATH/bin/nvcc" --version

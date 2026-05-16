@@ -524,6 +524,12 @@ def extract_json_with_repair(text: str, llm: LocalLLM = None) -> Dict[str, Any]:
 
     candidate = match.group(0).strip()
 
+    # Common failure mode from prompts with over-escaped format braces:
+    # model returns {{ "claims": [...] }} instead of { "claims": [...] }.
+    double_wrapped = candidate.strip()
+    if double_wrapped.startswith("{{") and double_wrapped.endswith("}}"):
+        candidate = double_wrapped[1:-1].strip()
+
     # Attempt 1: direct parse
     try:
         return json.loads(candidate)

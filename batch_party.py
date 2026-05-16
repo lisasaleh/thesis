@@ -265,6 +265,8 @@ def build_cmp_batch_input_csv(
     """
     rows = []
     skipped = 0
+    skipped_missing_file = 0
+    skipped_too_short = 0
     
     # Load debates metadata for date info
     debates_df = pd.read_csv(debates_csv)
@@ -275,8 +277,7 @@ def build_cmp_batch_input_csv(
         interventions, _ = load_debate_interventions(debate_id, data_dir)
         if interventions is None:
             skipped += 1
-            if logger:
-                logger.log(f"  Skipped {debate_id}: file not found", level="DEBUG")
+            skipped_missing_file += 1
             continue
         
         # Aggregate party speech
@@ -284,8 +285,7 @@ def build_cmp_batch_input_csv(
         
         if not party_text or word_count < min_tokens:
             skipped += 1
-            if logger:
-                logger.log(f"  Skipped {debate_id}: {word_count} words < {min_tokens}", level="DEBUG")
+            skipped_too_short += 1
             continue
         
         # Get debate date
@@ -315,9 +315,17 @@ def build_cmp_batch_input_csv(
         batch_df.to_csv(output_csv, index=False)
         if logger:
             logger.log(f"  Created batch input CSV: {output_csv} ({len(rows)} debates)")
+            logger.log(
+                f"  Batch input skipped: {skipped} "
+                f"(missing_file={skipped_missing_file}, too_short={skipped_too_short})"
+            )
     else:
         if logger:
             logger.log(f"  No valid debates for batch input")
+            logger.log(
+                f"  Batch input skipped: {skipped} "
+                f"(missing_file={skipped_missing_file}, too_short={skipped_too_short})"
+            )
     
     return len(rows), skipped
 
@@ -616,7 +624,7 @@ def process_party_staged(
             
             logger.log(
                 f"START OF EXTRACTION | party={party} | cmp_rank={cmp_rank} "
-                f"| cmp_code={cmp_info['cmp_code']} | model={model_7b} "
+                f"| cmp_code={cmp_code} | model={model_7b} "
                 f"| backend={backend} | debates={num_included}"
             )
             extract_success = run_command(
@@ -690,7 +698,7 @@ def process_party_staged(
             
             logger.log(
                 f"START OF SUMMARIZATION | party={party} | cmp_rank={cmp_rank} "
-                f"| cmp_code={cmp_info['cmp_code']} | model={model_7b} "
+                f"| cmp_code={cmp_code} | model={model_7b} "
                 f"| backend={backend} | debates={num_included}"
             )
             summary_success = run_command(
@@ -792,7 +800,7 @@ def process_party_staged(
 
             logger.log(
                 f"START OF NORMALIZATION | party={party} | cmp_rank={cmp_rank} "
-                f"| cmp_code={cmp_info['cmp_code']} | model={model_32b} "
+                f"| cmp_code={cmp_code} | model={model_32b} "
                 f"| backend={backend} | debates={num_included} "
                 f"| claims={n_claims_for_normalize}"
             )

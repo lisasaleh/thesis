@@ -115,6 +115,7 @@ python orchestrate_pipeline.py \
   --api_key "$API_KEY" \
   --api_temperature 0 \
   --api_timeout 180 \
+  --min_tokens 100 \
   --parties "$PARTY_LIST" \
   --cmp_ranks "$CMP_RANKS" \
   --extract_max_new_tokens "$EXTRACT_MAX_NEW_TOKENS" \

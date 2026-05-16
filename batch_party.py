@@ -238,6 +238,22 @@ def aggregate_party_speech(
     return full_text, word_count
 
 
+def split_text_into_word_chunks(text: str, max_words: int) -> List[Tuple[str, int, int]]:
+    """Return (chunk_text, word_start, word_end) tuples; word_end is exclusive."""
+    words = text.split()
+    if not words:
+        return []
+
+    if max_words <= 0 or len(words) <= max_words:
+        return [(text, 0, len(words))]
+
+    chunks = []
+    for start in range(0, len(words), max_words):
+        end = min(start + max_words, len(words))
+        chunks.append((" ".join(words[start:end]), start, end))
+    return chunks
+
+
 # ============================================================================
 # Batch Input Creation
 # ============================================================================
@@ -250,6 +266,7 @@ def build_cmp_batch_input_csv(
     data_dir: str,
     output_csv: str,
     min_tokens: int = 100,
+    chunk_max_words: int = 1000,
     logger: Optional[ProcessingLogger] = None
 ) -> Tuple[int, int]:
     """
@@ -296,25 +313,37 @@ def build_cmp_batch_input_csv(
                     date_value = str(debate_lookup.loc[debate_id, col]).strip()
                     break
         
-        # Create row (same schema as original debate interventions)
-        row = {
-            "document_id": debate_id,
-            "intervention_id": 1,  # Aggregated as single intervention
-            "party": party,
-            "speaker": party,  # For batch, speaker is the party aggregate
-            "speaker_label": party,  # For batch, no individual speaker label
-            "speech": party_text,
-            "n_words": word_count,
-            "date": date_value,
-        }
-        rows.append(row)
+        chunks = split_text_into_word_chunks(party_text, chunk_max_words)
+        for chunk_idx, (chunk_text, word_start, word_end) in enumerate(chunks, start=1):
+            row = {
+                "document_id": debate_id,
+                "intervention_id": chunk_idx,
+                "party": party,
+                "speaker": party,
+                "speaker_label": party,
+                "speech": chunk_text,
+                "n_words": len(chunk_text.split()),
+                "date": date_value,
+                "chunk_id": chunk_idx,
+                "chunk_word_start": word_start,
+                "chunk_word_end": word_end,
+                "source_n_words": word_count,
+                "source_n_chunks": len(chunks),
+            }
+            rows.append(row)
     
     # Write batch input CSV
     if rows:
         batch_df = pd.DataFrame(rows)
         batch_df.to_csv(output_csv, index=False)
         if logger:
-            logger.log(f"  Created batch input CSV: {output_csv} ({len(rows)} debates)")
+            n_debates = batch_df["document_id"].nunique()
+            n_chunked_debates = batch_df[batch_df["source_n_chunks"] > 1]["document_id"].nunique()
+            logger.log(f"  Created batch input CSV: {output_csv} ({len(rows)} rows from {n_debates} debates)")
+            logger.log(
+                f"  Chunking: max_words={chunk_max_words}, "
+                f"chunked_debates={n_chunked_debates}, max_chunks={batch_df['source_n_chunks'].max()}"
+            )
             logger.log(
                 f"  Batch input skipped: {skipped} "
                 f"(missing_file={skipped_missing_file}, too_short={skipped_too_short})"
@@ -440,6 +469,8 @@ def process_party_staged(
     force: bool = False,
     cmp_ranks: List[int] = None,
     extract_max_new_tokens: int = 1200,
+    extract_max_claims: int = 20,
+    chunk_max_words: int = 1000,
 ):
     """
     Process a single party through the STAGED pipeline.
@@ -461,6 +492,9 @@ def process_party_staged(
         logger.log(f"  API base URL: {api_base_url}")
         logger.log(f"  API model: {api_model_name or model_7b}")
     logger.log(f"  Min tokens: {min_tokens}")
+    logger.log(f"  Chunk max words: {chunk_max_words}")
+    logger.log(f"  Extract max claims per chunk: {extract_max_claims}")
+    logger.log(f"  Extract max new tokens: {extract_max_new_tokens}")
     logger.log(f"  Data directory: {data_dir}")
     
     # Create output directories
@@ -569,7 +603,7 @@ def process_party_staged(
         
         num_included, num_skipped = build_cmp_batch_input_csv(
             party, cmp_info, debate_ids, debates_csv, data_dir,
-            temp_batch_input, min_tokens, logger
+            temp_batch_input, min_tokens, chunk_max_words, logger
         )
 
         stats["total_debates_batch_input"] += num_included
@@ -583,7 +617,7 @@ def process_party_staged(
             continue
         
         # Step 2: Extract (batch) - load model ONCE for all debates
-        logger.log(f"\n[1/3] Extraction (batch of {num_included} debates)...")
+        logger.log(f"\n[1/3] Extraction (batch of {num_included} rows/chunks)...")
         
         # Check if extraction already completed - if so, load from durable storage
         extracted_final = os.path.join(extract_dir, f"{party}_cmp_{cmp_rank}_claims.csv")
@@ -609,6 +643,7 @@ def process_party_staged(
                 "--target_party", party,
                 "--backend", backend,
                 "--extract_max_new_tokens", str(extract_max_new_tokens),
+                "--extract_max_claims", str(extract_max_claims),
             ]
             if backend == "api":
                 extract_cmd.extend([
@@ -625,7 +660,7 @@ def process_party_staged(
             logger.log(
                 f"START OF EXTRACTION | party={party} | cmp_rank={cmp_rank} "
                 f"| cmp_code={cmp_code} | model={model_7b} "
-                f"| backend={backend} | debates={num_included}"
+                f"| backend={backend} | rows={num_included}"
             )
             extract_success = run_command(
                 extract_cmd,
@@ -655,7 +690,7 @@ def process_party_staged(
                     logger.log(f"  [CHECKPOINT] Rank {cmp_rank}: extract completed")
         
         # Step 3: Summarize (batch) - load model ONCE for all debates
-        logger.log(f"\n[2/3] Summarization (batch of {num_included} debates)...")
+        logger.log(f"\n[2/3] Summarization (batch of {num_included} rows/chunks)...")
         
         # Check if summarization already completed
         combined_summary_output = os.path.join(
@@ -699,7 +734,7 @@ def process_party_staged(
             logger.log(
                 f"START OF SUMMARIZATION | party={party} | cmp_rank={cmp_rank} "
                 f"| cmp_code={cmp_code} | model={model_7b} "
-                f"| backend={backend} | debates={num_included}"
+                f"| backend={backend} | rows={num_included}"
             )
             summary_success = run_command(
                 summary_cmd,
@@ -746,7 +781,7 @@ def process_party_staged(
                     summary_output = None
         
         # Step 4: Normalize (batch) - only run if we have both extract and summary outputs
-        logger.log(f"\n[3/3] Normalization (batch of {num_included} debates)...")
+        logger.log(f"\n[3/3] Normalization (batch of {num_included} rows/chunks)...")
         
         if not extract_output or not summary_output:
             logger.log(f"SKIPPING normalization: missing extract ({extract_output is not None}) or summary ({summary_output is not None})", level="WARN")
@@ -801,7 +836,7 @@ def process_party_staged(
             logger.log(
                 f"START OF NORMALIZATION | party={party} | cmp_rank={cmp_rank} "
                 f"| cmp_code={cmp_code} | model={model_32b} "
-                f"| backend={backend} | debates={num_included} "
+                f"| backend={backend} | rows={num_included} "
                 f"| claims={n_claims_for_normalize}"
             )
             normalize_success = run_command(
@@ -859,7 +894,7 @@ def process_party_staged(
     logger.log(f"  CMP Ranks Processed:        {stats['cmp_ranks_processed']}")
     logger.log(f"  CMP Ranks Completed:        {stats['cmp_ranks_completed']} ✓")
     logger.log(f"  CMP Ranks Failed:           {stats['cmp_ranks_failed']} ✗")
-    logger.log(f"  Total Debates in Batches:   {stats['total_debates_batch_input']}")
+    logger.log(f"  Total Batch Rows/Chunks:    {stats['total_debates_batch_input']}")
     logger.log(f"  Total Debates Skipped:      {stats['total_debates_skipped']}")
     logger.log(f"{'='*80}")
 
@@ -908,6 +943,10 @@ def parse_args():
                         help="Comma-separated CMP ranks to process, e.g. '1' or '1,3,5'")
     parser.add_argument("--extract_max_new_tokens", type=int, default=1200,
                         help="Maximum new tokens for extraction JSON output")
+    parser.add_argument("--extract_max_claims", type=int, default=20,
+                        help="Maximum number of claims to extract per intervention")
+    parser.add_argument("--chunk_max_words", type=int, default=1000,
+                        help="Split aggregated party-debate speeches into chunks of at most this many words; use 0 to disable")
     parser.add_argument("--backend", choices=["local", "api"], default=os.environ.get("LLM_BACKEND", "local"),
                         help="Model backend: local transformers or OpenAI-compatible API")
     parser.add_argument("--api_base_url", type=str, default=os.environ.get("LLM_API_BASE_URL", "http://127.0.0.1:8000/v1"),
@@ -960,6 +999,8 @@ def main():
         force=args.force,
         cmp_ranks=cmp_ranks,
         extract_max_new_tokens=args.extract_max_new_tokens,
+        extract_max_claims=args.extract_max_claims,
+        chunk_max_words=args.chunk_max_words,
     )
 
 

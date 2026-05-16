@@ -33,6 +33,12 @@ def parse_args():
         default=1200,
         help="Maximum new tokens for claim extraction JSON.",
     )
+    parser.add_argument(
+        "--extract_max_claims",
+        type=int,
+        default=20,
+        help="Maximum number of claims to extract per intervention.",
+    )
 
     parser.add_argument("--target_party", type=str, default=None, help="Party to filter for extraction (if None, processes all)")
     parser.add_argument("--resume", action="store_true")
@@ -42,7 +48,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:
+def validate_claim_extraction_output(data: Dict[str, Any], max_claims: int = None) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return {"claims": []}
 
@@ -61,16 +67,20 @@ def validate_claim_extraction_output(data: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(quote, str) and quote.strip():
             cleaned_claims.append({"quote": quote.strip()})
 
+    if max_claims is not None and max_claims > 0:
+        cleaned_claims = cleaned_claims[:max_claims]
+
     return {"claims": cleaned_claims}
 
 
-def extract_claims(llm, intervention_text: str, max_new_tokens: int):
+def extract_claims(llm, intervention_text: str, max_new_tokens: int, max_claims: int):
     # Pre-process: escape problematic characters
     cleaned_text = intervention_text.replace('\n', ' ').replace('\t', ' ').replace('\r', ' ')
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     
     prompt = build_claim_extraction_prompt(
         text=cleaned_text,
+        max_claims=max_claims,
     )
 
     # Long parliamentary interventions can contain many claims; tune this for
@@ -82,7 +92,7 @@ def extract_claims(llm, intervention_text: str, max_new_tokens: int):
         max_new_tokens=max_new_tokens,
         temperature=0.0,
     )
-    parsed = validate_claim_extraction_output(parsed)
+    parsed = validate_claim_extraction_output(parsed, max_claims=max_claims)
 
     return {
         "raw_model_output": raw_output,
@@ -203,6 +213,7 @@ def main():
                 llm,
                 intervention_text=text,
                 max_new_tokens=args.extract_max_new_tokens,
+                max_claims=args.extract_max_claims,
             )
             parsed_output = result["parsed_output"]
             raw_model_output = result["raw_model_output"]

@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --partition=gpu_a100
 #SBATCH --gpus=1
-#SBATCH --job-name=batch_1
+#SBATCH --job-name=validate_prefilter
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=16:00:00
-#SBATCH --output=slurm_output/batch_1_%A.out
+#SBATCH --output=slurm_output/validate_prefilter_%A.out
 
 set -euo pipefail
 
@@ -25,56 +25,27 @@ export HF_DATASETS_CACHE="$HF_HOME"
 export VLLM_USE_V1=0
 
 source "$CONDA_BASE/etc/profile.d/conda.sh"
-
-test -d "$ENV_PATH/lib/python3.10/encodings" || {
-  echo "ERROR: $ENV_PATH is missing lib/python3.10/encodings."
-  echo "Run: sbatch jobs/fix_env.job"
-  exit 2
-}
-
 set +u
 conda activate "$ENV_PATH"
 set -u
-export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
-# FlashInfer/vLLM JIT needs CUDA development headers such as curand.h.
-# Keep CUDA_HOME pointed at the CUDA module, not the conda environment.
 export CUDA_HOME="${EBROOTCUDA:-${CUDA_HOME:-/sw/arch/RHEL9/EB_production/2025/software/CUDA/12.8.0}}"
 export CUDA_PATH="$CUDA_HOME"
 export PATH="$CUDA_HOME/bin:$CONDA_PREFIX/bin:$PATH"
 export CPATH="$CUDA_HOME/targets/x86_64-linux/include:${CPATH:-}"
 export LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:${LIBRARY_PATH:-}"
 export LD_LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-rm -rf ~/.cache/flashinfer
 
 cd ~/thesis
 
-python -c "import sys, encodings; print(sys.executable); print('python encodings ok')"
-python -c "import scipy.optimize, vllm; print('scipy/vllm import ok')"
-echo "VLLM_USE_V1=$VLLM_USE_V1"
-echo "CUDA_HOME=$CUDA_HOME"
-echo "nvcc=$(command -v nvcc || true)"
-test -f "$CUDA_HOME/targets/x86_64-linux/include/curand.h" || {
-  echo "ERROR: curand.h not found under $CUDA_HOME/targets/x86_64-linux/include."
-  echo "CUDA module/header visibility is still broken."
-  exit 3
-}
-echo "curand.h=$CUDA_HOME/targets/x86_64-linux/include/curand.h"
-if command -v nvcc >/dev/null 2>&1; then
-  nvcc --version
-else
-  echo "ERROR: nvcc not found after loading CUDA/12.8.0."
-  exit 4
-fi
+python -m py_compile cmp_roberta_prefilter.py batch_party_prefilter.py orchestrate_prefiltered_pipeline.py
 
 MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
 SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"
 API_BASE_URL="http://127.0.0.1:8000/v1"
 API_KEY="EMPTY"
-PARTY_LIST="VVD"
-CMP_RANKS="1"
-EXTRACT_MAX_NEW_TOKENS="900"
-EXTRACT_MAX_CLAIMS="15"
+VALIDATION_PARTY="${VALIDATION_PARTY:-VVD}"
+VALIDATION_CMP_RANKS="${VALIDATION_CMP_RANKS:-1}"
 
 python -m vllm.entrypoints.openai.api_server \
   --model "$MODEL_PATH" \
@@ -92,22 +63,13 @@ for i in $(seq 1 120); do
     echo "vLLM API server is ready"
     break
   fi
-  if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
-    echo "vLLM server exited before becoming ready"
-    tail -100 "slurm_output/vllm_${SLURM_JOB_ID}.log"
-    exit 1
-  fi
   sleep 5
 done
 
-if ! curl -fsS "${API_BASE_URL}/models" >/dev/null 2>&1; then
-  echo "Timed out waiting for vLLM API server"
-  tail -100 "slurm_output/vllm_${SLURM_JOB_ID}.log"
-  exit 1
-fi
-
-python orchestrate_pipeline.py \
-  --mode sequential \
+python orchestrate_prefiltered_pipeline.py \
+  --validation_mode \
+  --validation_party "$VALIDATION_PARTY" \
+  --validation_cmp_ranks "$VALIDATION_CMP_RANKS" \
   --model_7b "$MODEL_PATH" \
   --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
   --backend api \
@@ -117,9 +79,7 @@ python orchestrate_pipeline.py \
   --api_temperature 0 \
   --api_timeout 180 \
   --min_tokens 100 \
-  --parties "$PARTY_LIST" \
-  --cmp_ranks "$CMP_RANKS" \
-  --extract_max_new_tokens "$EXTRACT_MAX_NEW_TOKENS" \
-  --extract_max_claims "$EXTRACT_MAX_CLAIMS" \
-  --force \
+  --extract_max_new_tokens 900 \
+  --extract_max_claims 15 \
+  --prefilter_top_k 3 \
   --resume

@@ -38,7 +38,7 @@ export LD_LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:$CONDA_PREFIX/lib:${
 
 cd ~/thesis
 
-python -m py_compile cmp_roberta_prefilter.py batch_party_prefilter.py orchestrate_prefiltered_pipeline.py
+python -m py_compile extract.py cmp_roberta_prefilter.py batch_party_prefilter.py orchestrate_prefiltered_pipeline.py
 
 MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
 SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"

@@ -78,10 +78,15 @@ def extract_claims(llm, intervention_text: str, max_new_tokens: int, max_claims:
     cleaned_text = intervention_text.replace('\n', ' ').replace('\t', ' ').replace('\r', ' ')
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     
-    prompt = build_claim_extraction_prompt(
-        text=cleaned_text,
-        max_claims=max_claims,
-    )
+    try:
+        prompt = build_claim_extraction_prompt(
+            text=cleaned_text,
+            max_claims=max_claims,
+        )
+    except TypeError as e:
+        if "max_claims" not in str(e):
+            raise
+        prompt = build_claim_extraction_prompt(text=cleaned_text)
 
     # Long parliamentary interventions can contain many claims; tune this for
     # the speed/completeness tradeoff in smoke tests versus full runs.

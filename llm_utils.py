@@ -34,6 +34,13 @@ def _chat_completions_url(base_url: str) -> str:
     return f"{base_url}/v1/chat/completions"
 
 
+def _models_url(base_url: str) -> str:
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        return f"{base_url}/models"
+    return f"{base_url}/v1/models"
+
+
 def _extract_usage(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     usage = data.get("usage")
     return usage if isinstance(usage, dict) else None
@@ -128,6 +135,7 @@ class APILLM:
     def __init__(self, config: APIConfig):
         self.config = config
         self.model_name = config.model_name
+        self.validate()
 
     def generate(
         self,
@@ -144,6 +152,61 @@ class APILLM:
             max_tokens=max_new_tokens,
             temperature=temperature,
         )
+
+    def validate(self) -> None:
+        headers = {"Authorization": f"Bearer {self.config.api_key or 'EMPTY'}"}
+        models_url = _models_url(self.config.base_url)
+        chat_url = _chat_completions_url(self.config.base_url)
+
+        try:
+            request = urllib.request.Request(models_url, headers=headers, method="GET")
+            with urllib.request.urlopen(request, timeout=self.config.timeout) as response:
+                models_body = response.read().decode("utf-8")
+        except Exception as e:
+            raise RuntimeError(f"API server is not reachable at {models_url}: {e}") from e
+
+        try:
+            models_data = json.loads(models_body)
+            model_ids = [
+                item.get("id")
+                for item in models_data.get("data", [])
+                if isinstance(item, dict)
+            ]
+            if model_ids and self.config.model_name not in model_ids:
+                print(
+                    f"[WARN] API model '{self.config.model_name}' not listed by {models_url}. Available models: {model_ids}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        except Exception:
+            pass
+
+        probe_payload = {
+            "model": self.config.model_name,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "temperature": 0,
+        }
+        try:
+            request = urllib.request.Request(
+                chat_url,
+                data=json.dumps(probe_payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.config.api_key or 'EMPTY'}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=self.config.timeout) as response:
+                response.read()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"API chat completions endpoint failed at {chat_url}: HTTP {e.code}. "
+                f"Response: {body[:500]}"
+            ) from e
+        except Exception as e:
+            raise RuntimeError(f"API chat completions endpoint failed at {chat_url}: {e}") from e
 
 
 def add_backend_args(parser):

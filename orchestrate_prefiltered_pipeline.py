@@ -63,6 +63,7 @@ def party_cmd(args, party: str) -> list[str]:
         "--prefilter_dir", args.prefilter_dir,
         "--summary_dir", args.summary_dir,
         "--normalize_dir", args.normalize_dir,
+        "--log_dir", args.log_dir,
         "--debates_csv", args.debates_csv,
         "--cmp_manifest_csv", args.cmp_manifest_csv,
         "--data_dir", args.data_dir,
@@ -226,6 +227,7 @@ def parse_args():
     parser.add_argument("--prefilter_dir", default="/scratch-shared/lsaleh/prefiltered")
     parser.add_argument("--summary_dir", default="/scratch-shared/lsaleh/summaries")
     parser.add_argument("--normalize_dir", default="/scratch-shared/lsaleh/normalized")
+    parser.add_argument("--log_dir", default="/scratch-shared/lsaleh/prefiltered_logs")
     parser.add_argument("--debates_csv", default="outputs/debates.csv")
     parser.add_argument("--cmp_manifest_csv", default="outputs/cmp_manifest.csv")
     parser.add_argument("--data_dir", default="/scratch-shared/lsaleh/debates/")

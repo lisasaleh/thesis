@@ -407,6 +407,22 @@ def find_latest_file(directory: str, pattern: str) -> Optional[str]:
     return os.path.join(directory, files[0])
 
 
+def safe_path_part(value: str) -> str:
+    """Make a value safe to use as one path segment."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value).strip())
+
+
+def temp_stage_dir(root_dir: str, party: str, stage: str, cmp_rank: int) -> str:
+    """Return an isolated temp directory for one party/CMP/stage."""
+    return os.path.join(
+        root_dir,
+        "tmp",
+        safe_path_part(party),
+        f"cmp_{cmp_rank}",
+        stage,
+    )
+
+
 def concatenate_summary_csvs(directory: str, output_csv: str) -> bool:
     """
     Concatenate all *_summary*.csv files in a directory into one combined CSV.
@@ -553,9 +569,9 @@ def process_party_staged(
         
         # Define temp directories at start of loop (before any conditional branches)
         # This ensures they exist even if stages are skipped on resume
-        temp_extract_dir = os.path.join(".tmp_batch", f"extract_cmp_{cmp_rank}")
-        temp_summary_dir = os.path.join(".tmp_batch", f"summary_cmp_{cmp_rank}")
-        temp_normalize_dir = os.path.join(".tmp_batch", f"normalize_cmp_{cmp_rank}")
+        temp_extract_dir = temp_stage_dir(extract_dir, party, "extract", cmp_rank)
+        temp_summary_dir = temp_stage_dir(extract_dir, party, "summary", cmp_rank)
+        temp_normalize_dir = temp_stage_dir(extract_dir, party, "normalize", cmp_rank)
         
         # Track summary files moved for THIS rank (to avoid pollution from other CMPs)
         summary_files_moved_this_rank = []

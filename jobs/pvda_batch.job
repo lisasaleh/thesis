@@ -118,6 +118,7 @@ python orchestrate_prefiltered_pipeline.py \
   --summary_dir "$SCRATCH_OUTPUT_ROOT/summaries" \
   --normalize_dir "$SCRATCH_OUTPUT_ROOT/normalized" \
   --log_dir "$LOG_DIR" \
+  --temp_dir "$SCRATCH_OUTPUT_ROOT/tmp" \
   --extract_max_new_tokens "$EXTRACT_MAX_NEW_TOKENS" \
   --extract_max_claims "$EXTRACT_MAX_CLAIMS" \
   --prefilter_top_k "$PREFILTER_TOP_K" \

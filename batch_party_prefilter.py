@@ -11,6 +11,7 @@ functions in batch_party.py. The old batch_party.py flow is left unchanged.
 
 import argparse
 import os
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -101,6 +102,19 @@ def make_retained_inputs(
 
 def force_stage(args, stage: str) -> bool:
     return args.force or stage in args.force_stages_set
+
+
+def safe_path_part(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value).strip())
+
+
+def temp_stage_dir(args, stage: str, rank: int) -> str:
+    return os.path.join(
+        args.temp_dir,
+        safe_path_part(args.party),
+        f"cmp_{rank}",
+        stage,
+    )
 
 
 def combine_summary_files(
@@ -241,7 +255,7 @@ def process_party_prefiltered(args) -> None:
             logger.log(f"[SKIPPED] Extraction output exists: {extracted_final}")
             mark_stage(logger, completed, rank, "extract")
         else:
-            temp_extract_dir = os.path.join(".tmp_batch_prefilter", f"extract_cmp_{rank}")
+            temp_extract_dir = temp_stage_dir(args, "extract", rank)
             os.makedirs(temp_extract_dir, exist_ok=True)
             extract_cmd = [
                 "python", "extract.py",
@@ -361,7 +375,7 @@ def process_party_prefiltered(args) -> None:
             logger.log(f"[SKIPPED] Summary output exists: {combined_summary_output}")
             mark_stage(logger, completed, rank, "summarize")
         else:
-            temp_summary_dir = os.path.join(".tmp_batch_prefilter", f"summary_cmp_{rank}")
+            temp_summary_dir = temp_stage_dir(args, "summary", rank)
             os.makedirs(temp_summary_dir, exist_ok=True)
             summary_cmd = [
                 "python", "incr_summary.py",
@@ -394,7 +408,7 @@ def process_party_prefiltered(args) -> None:
             logger.log(f"[SKIPPED] Normalization output exists: {normalized_final}")
             mark_stage(logger, completed, rank, "normalize")
         else:
-            temp_normalize_dir = os.path.join(".tmp_batch_prefilter", f"normalize_cmp_{rank}")
+            temp_normalize_dir = temp_stage_dir(args, "normalize", rank)
             os.makedirs(temp_normalize_dir, exist_ok=True)
             normalize_cmd = [
                 "python", "normalize.py",
@@ -465,6 +479,7 @@ def parse_args():
     parser.add_argument("--summary_dir", default="/scratch-shared/lsaleh/summaries")
     parser.add_argument("--normalize_dir", default="/scratch-shared/lsaleh/normalized")
     parser.add_argument("--log_dir", default="outputs/logs")
+    parser.add_argument("--temp_dir", default="/scratch-shared/lsaleh/prefilter_pipeline/tmp")
     parser.add_argument("--debates_csv", default="outputs/debates.csv")
     parser.add_argument("--cmp_manifest_csv", default="outputs/cmp_manifest.csv")
     parser.add_argument("--data_dir", default="/scratch-shared/lsaleh/debates/")

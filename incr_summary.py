@@ -11,6 +11,13 @@ from llm_utils import add_backend_args, create_llm_from_args, generate_json_with
 from prompts.summary_prompt import build_incremental_summary_prompt
 
 
+def safe_to_csv(df: pd.DataFrame, path: str) -> None:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    df.to_csv(path, index=False)
+
+
 def validate_state(parsed: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(parsed, dict):
         return {
@@ -232,12 +239,12 @@ def main():
 
             if (i + 1) % args.checkpoint_every == 0:
                 out_df = pd.DataFrame(processed_records)
-                out_df.to_csv(output_csv, index=False)
+                safe_to_csv(out_df, output_csv)
         
         # Final save for this document
         if processed_records:
             out_df = pd.DataFrame(processed_records)
-            out_df.to_csv(output_csv, index=False)
+            safe_to_csv(out_df, output_csv)
             print(f"[DEBUG] Saved {len(processed_records)} rows to {output_csv}", flush=True)
 
 

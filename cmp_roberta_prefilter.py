@@ -68,7 +68,8 @@ def get_target_cmp_code(
 
     manifest_df = pd.read_csv(manifest_file)
     row = manifest_df.loc[
-        manifest_df["party"].astype(str).str.strip().eq(str(resolved_party).strip())
+        manifest_df["party"].astype(str).str.strip().str.upper()
+        .eq(str(resolved_party).strip().upper())
     ]
     if row.empty:
         raise ValueError(f"Party {resolved_party!r} not found in {manifest_file}")

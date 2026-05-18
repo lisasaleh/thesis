@@ -46,14 +46,14 @@ SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"
 API_PORT=$((20000 + (( ${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}} + ${SLURM_ARRAY_TASK_ID:-0} ) % 20000) ))
 API_BASE_URL="http://127.0.0.1:${API_PORT}/v1"
 API_KEY="EMPTY"
-PARTY_LIST="${PARTY_LIST:-sp}"
+PARTY_LIST="${PARTY_LIST:-SP}"
 CMP_RANKS="${CMP_RANKS:-${SLURM_ARRAY_TASK_ID:-1}}"
 EXTRACT_MAX_NEW_TOKENS="${EXTRACT_MAX_NEW_TOKENS:-1400}"
 EXTRACT_MAX_CLAIMS="${EXTRACT_MAX_CLAIMS:-15}"
 PREFILTER_TOP_K="${PREFILTER_TOP_K:-3}"
 FORCE_STAGES="${FORCE_STAGES:-}"
 ROBERTA_DEVICE="${ROBERTA_DEVICE:-cpu}"
-SCRATCH_OUTPUT_ROOT="${SCRATCH_OUTPUT_ROOT:-/scratch-shared/lsaleh/prefilter_pipeline/sp}"
+SCRATCH_OUTPUT_ROOT="${SCRATCH_OUTPUT_ROOT:-/scratch-shared/lsaleh/prefilter_pipeline/SP}"
 LOG_DIR="$SCRATCH_OUTPUT_ROOT/logs/rank_${CMP_RANKS}"
 
 echo "================================================================================"
@@ -118,6 +118,7 @@ python orchestrate_prefiltered_pipeline.py \
   --summary_dir "$SCRATCH_OUTPUT_ROOT/summaries" \
   --normalize_dir "$SCRATCH_OUTPUT_ROOT/normalized" \
   --log_dir "$LOG_DIR" \
+  --temp_dir "$SCRATCH_OUTPUT_ROOT/tmp" \
   --extract_max_new_tokens "$EXTRACT_MAX_NEW_TOKENS" \
   --extract_max_claims "$EXTRACT_MAX_CLAIMS" \
   --prefilter_top_k "$PREFILTER_TOP_K" \

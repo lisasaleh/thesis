@@ -13,6 +13,13 @@ from llm_utils import add_backend_args, create_llm_from_args, generate_json_with
 from prompts.extract_prompt import CLAIM_EXTRACTION_SYSTEM_PROMPT, build_claim_extraction_prompt
 
 
+def safe_to_csv(df: pd.DataFrame, path: str) -> None:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    df.to_csv(path, index=False)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
@@ -231,7 +238,7 @@ def main():
             row_dict["claim_extraction_json"] = json.dumps({"claims": []}, ensure_ascii=False)
             row_dict["n_claims"] = 0
             processed_records.append(row_dict)
-            pd.DataFrame(processed_records).to_csv(output_csv, index=False)
+            safe_to_csv(pd.DataFrame(processed_records), output_csv)
             continue
 
         # Store results
@@ -246,12 +253,12 @@ def main():
         flattened_claims.extend(temp_flat)
 
         # Incremental saving (safe for crashes)
-        pd.DataFrame(processed_records).to_csv(output_csv, index=False)
-        pd.DataFrame(flattened_claims).to_csv(output_claims_csv, index=False)
+        safe_to_csv(pd.DataFrame(processed_records), output_csv)
+        safe_to_csv(pd.DataFrame(flattened_claims), output_claims_csv)
 
     # Final save
-    pd.DataFrame(processed_records).to_csv(output_csv, index=False)
-    pd.DataFrame(flattened_claims).to_csv(output_claims_csv, index=False)
+    safe_to_csv(pd.DataFrame(processed_records), output_csv)
+    safe_to_csv(pd.DataFrame(flattened_claims), output_claims_csv)
 
     print("[DEBUG] Extraction finished successfully.", flush=True)
 

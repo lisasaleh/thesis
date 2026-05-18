@@ -61,6 +61,39 @@ def read_csv_or_empty(path: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def case_insensitive_existing_path(path: str) -> str:
+    """Return an existing path matching basename case-insensitively, if present."""
+    if os.path.exists(path):
+        return path
+
+    directory = os.path.dirname(path)
+    basename = os.path.basename(path).lower()
+    if not directory or not os.path.isdir(directory):
+        return path
+
+    for candidate in os.listdir(directory):
+        if candidate.lower() == basename:
+            return os.path.join(directory, candidate)
+
+    return path
+
+
+def find_existing_stage_path(path: str, fallback_dirs: list[str] = None) -> str:
+    """Find an existing stage file, allowing case-only filename/root changes."""
+    found = case_insensitive_existing_path(path)
+    if os.path.exists(found):
+        return found
+
+    fallback_dirs = fallback_dirs or []
+    basename = os.path.basename(path)
+    for directory in fallback_dirs:
+        candidate = case_insensitive_existing_path(os.path.join(directory, basename))
+        if os.path.exists(candidate):
+            return candidate
+
+    return path
+
+
 def make_retained_inputs(
     batch_input_csv: str,
     labeled_claims_csv: str,
@@ -204,17 +237,41 @@ def process_party_prefiltered(args) -> None:
         )
         normalized_final = os.path.join(args.normalize_dir, f"{args.party}_cmp_{rank}_prefiltered_normalized.csv")
         final_recheck_csv = os.path.join(args.prefilter_dir, f"{args.party}_cmp_{rank}_normalized_roberta_recheck.csv")
+        output_root = os.path.dirname(os.path.dirname(args.extract_dir))
+        legacy_extract_dirs = [
+            os.path.join(output_root, args.party.lower(), "extracted"),
+            os.path.join(output_root, args.party.upper(), "extracted"),
+        ]
+        legacy_prefilter_dirs = [
+            os.path.join(output_root, args.party.lower(), "prefiltered"),
+            os.path.join(output_root, args.party.upper(), "prefiltered"),
+        ]
+        legacy_summary_dirs = [
+            os.path.join(output_root, args.party.lower(), "summaries"),
+            os.path.join(output_root, args.party.upper(), "summaries"),
+        ]
+        legacy_normalize_dirs = [
+            os.path.join(output_root, args.party.lower(), "normalized"),
+            os.path.join(output_root, args.party.upper(), "normalized"),
+        ]
+
+        extracted_existing = find_existing_stage_path(extracted_final, legacy_extract_dirs)
+        labeled_existing = find_existing_stage_path(labeled_claims_csv, legacy_prefilter_dirs)
+        retained_claims_existing = find_existing_stage_path(retained_claims_csv, legacy_prefilter_dirs)
+        combined_summary_existing = find_existing_stage_path(combined_summary_output, legacy_summary_dirs)
+        normalized_existing = find_existing_stage_path(normalized_final, legacy_normalize_dirs)
+        final_recheck_existing = find_existing_stage_path(final_recheck_csv, legacy_prefilter_dirs)
 
         if (
             not args.force
-            and os.path.exists(extracted_final)
-            and os.path.exists(labeled_claims_csv)
-            and os.path.exists(retained_claims_csv)
+            and os.path.exists(extracted_existing)
+            and os.path.exists(labeled_existing)
+            and os.path.exists(retained_claims_existing)
             and os.path.exists(retained_claim_chunks_csv)
             and os.path.exists(retained_debate_context_csv)
-            and os.path.exists(combined_summary_output)
-            and os.path.exists(normalized_final)
-            and (not args.final_cmp_recheck or os.path.exists(final_recheck_csv))
+            and os.path.exists(combined_summary_existing)
+            and os.path.exists(normalized_existing)
+            and (not args.final_cmp_recheck or os.path.exists(final_recheck_existing))
         ):
             logger.log(f"[SKIPPED] Rank {rank} already has all final outputs")
             stats["completed"] += 1
@@ -251,8 +308,9 @@ def process_party_prefiltered(args) -> None:
 
         stats["processed"] += 1
 
-        if not force_stage(args, "extract") and os.path.exists(extracted_final):
-            logger.log(f"[SKIPPED] Extraction output exists: {extracted_final}")
+        if not force_stage(args, "extract") and os.path.exists(extracted_existing):
+            logger.log(f"[SKIPPED] Extraction output exists: {extracted_existing}")
+            extracted_final = extracted_existing
             mark_stage(logger, completed, rank, "extract")
         else:
             temp_extract_dir = temp_stage_dir(args, "extract", rank)
@@ -282,8 +340,9 @@ def process_party_prefiltered(args) -> None:
         raw_claims_df = read_csv_or_empty(extracted_final)
         stats["raw_claims"] += len(raw_claims_df)
 
-        if not force_stage(args, "prefilter") and os.path.exists(labeled_claims_csv):
-            logger.log(f"[SKIPPED] RoBERTa prefilter output exists: {labeled_claims_csv}")
+        if not force_stage(args, "prefilter") and os.path.exists(labeled_existing):
+            logger.log(f"[SKIPPED] RoBERTa prefilter output exists: {labeled_existing}")
+            labeled_claims_csv = labeled_existing
             mark_stage(logger, completed, rank, "prefilter")
         else:
             prefilter_cmd = [
@@ -312,7 +371,7 @@ def process_party_prefiltered(args) -> None:
         if (
             force_stage(args, "retained_inputs")
             or not (
-                os.path.exists(retained_claims_csv)
+                os.path.exists(retained_claims_existing)
                 and os.path.exists(retained_claim_chunks_csv)
                 and os.path.exists(retained_debate_context_csv)
             )
@@ -330,6 +389,7 @@ def process_party_prefiltered(args) -> None:
                 f"context_chunks={retained_context_chunks}"
             )
         else:
+            retained_claims_csv = retained_claims_existing
             kept_claims = len(read_csv_or_empty(retained_claims_csv))
             retained_claim_chunks = len(read_csv_or_empty(retained_claim_chunks_csv))
             retained_context_chunks = len(read_csv_or_empty(retained_debate_context_csv))
@@ -371,8 +431,9 @@ def process_party_prefiltered(args) -> None:
             stats["completed"] += 1
             continue
 
-        if not force_stage(args, "summarize") and os.path.exists(combined_summary_output):
-            logger.log(f"[SKIPPED] Summary output exists: {combined_summary_output}")
+        if not force_stage(args, "summarize") and os.path.exists(combined_summary_existing):
+            logger.log(f"[SKIPPED] Summary output exists: {combined_summary_existing}")
+            combined_summary_output = combined_summary_existing
             mark_stage(logger, completed, rank, "summarize")
         else:
             temp_summary_dir = temp_stage_dir(args, "summary", rank)
@@ -404,8 +465,9 @@ def process_party_prefiltered(args) -> None:
                 continue
             mark_stage(logger, completed, rank, "summarize")
 
-        if not force_stage(args, "normalize") and os.path.exists(normalized_final):
-            logger.log(f"[SKIPPED] Normalization output exists: {normalized_final}")
+        if not force_stage(args, "normalize") and os.path.exists(normalized_existing):
+            logger.log(f"[SKIPPED] Normalization output exists: {normalized_existing}")
+            normalized_final = normalized_existing
             mark_stage(logger, completed, rank, "normalize")
         else:
             temp_normalize_dir = temp_stage_dir(args, "normalize", rank)
@@ -432,8 +494,8 @@ def process_party_prefiltered(args) -> None:
             mark_stage(logger, completed, rank, "normalize")
 
         if args.final_cmp_recheck:
-            if not force_stage(args, "final_cmp_recheck") and os.path.exists(final_recheck_csv):
-                logger.log(f"[SKIPPED] Final CMP recheck exists: {final_recheck_csv}")
+            if not force_stage(args, "final_cmp_recheck") and os.path.exists(final_recheck_existing):
+                logger.log(f"[SKIPPED] Final CMP recheck exists: {final_recheck_existing}")
             else:
                 recheck_cmd = [
                     "python", "cmp_roberta_prefilter.py",

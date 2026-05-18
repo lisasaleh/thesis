@@ -105,7 +105,8 @@ def load_cmp_manifest(csv_path: str) -> pd.DataFrame:
 
 def normalize_party_name(party: str) -> str:
     """Normalize party name using aliases."""
-    return PARTY_ALIASES.get(party, party)
+    party_str = str(party).strip()
+    return PARTY_ALIASES.get(party_str.upper(), party_str.upper())
 
 
 def get_party_cmp_codes(cmp_manifest: pd.DataFrame, party: str) -> List[Dict]:
@@ -116,7 +117,10 @@ def get_party_cmp_codes(cmp_manifest: pd.DataFrame, party: str) -> List[Dict]:
         [{"rank": 1, "code": 605, "theme_ids": [...], "title": "..."},
          {"rank": 2, "code": 303, ...}, ...]
     """
-    party_row = cmp_manifest[cmp_manifest["party"] == party]
+    party_row = cmp_manifest[
+        cmp_manifest["party"].astype(str).str.strip().str.upper()
+        == str(party).strip().upper()
+    ]
     if party_row.empty:
         return []
     

@@ -1,0 +1,133 @@
+#!/bin/bash
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=SGP_batch_prefiltered
+#SBATCH --ntasks=1
+#SBATCH --array=3-5
+#SBATCH --cpus-per-task=8
+#SBATCH --time=16:00:00
+#SBATCH --output=slurm_output/SGP_batch_prefiltered_%A_%a.out
+
+set -euo pipefail
+
+module purge
+module load 2025
+module load CUDA/12.8.0
+module load Anaconda3/2025.06-1
+
+unset PYTHONHOME
+unset PYTHONPATH
+CONDA_BASE=/sw/arch/RHEL9/EB_production/2025/software/Anaconda3/2025.06-1
+ENV_PATH=/scratch-shared/lsaleh/.conda/envs/thesis
+export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
+export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
+export TRANSFORMERS_CACHE="$HF_HOME"
+export HF_DATASETS_CACHE="$HF_HOME"
+export VLLM_USE_V1=0
+
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+set +u
+conda activate "$ENV_PATH"
+set -u
+
+export CUDA_HOME="${EBROOTCUDA:-${CUDA_HOME:-/sw/arch/RHEL9/EB_production/2025/software/CUDA/12.8.0}}"
+export CUDA_PATH="$CUDA_HOME"
+export PATH="$CUDA_HOME/bin:$CONDA_PREFIX/bin:$PATH"
+export CPATH="$CUDA_HOME/targets/x86_64-linux/include:${CPATH:-}"
+export LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:${LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+
+cd ~/thesis
+
+python -m py_compile llm_utils.py extract.py cmp_roberta_prefilter.py batch_party_prefilter.py orchestrate_prefiltered_pipeline.py
+
+MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"
+SERVED_MODEL="Qwen/Qwen2.5-7B-Instruct"
+API_PORT=$((20000 + (( ${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}} + ${SLURM_ARRAY_TASK_ID:-0} ) % 20000) ))
+API_BASE_URL="http://127.0.0.1:${API_PORT}/v1"
+API_KEY="EMPTY"
+PARTY_LIST="${PARTY_LIST:-SGP}"
+CMP_RANKS="${CMP_RANKS:-${SLURM_ARRAY_TASK_ID:-1}}"
+EXTRACT_MAX_NEW_TOKENS="${EXTRACT_MAX_NEW_TOKENS:-1400}"
+EXTRACT_MAX_CLAIMS="${EXTRACT_MAX_CLAIMS:-15}"
+PREFILTER_TOP_K="${PREFILTER_TOP_K:-3}"
+FORCE_STAGES="${FORCE_STAGES:-}"
+ROBERTA_DEVICE="${ROBERTA_DEVICE:-cpu}"
+SCRATCH_OUTPUT_ROOT="${SCRATCH_OUTPUT_ROOT:-/scratch-shared/lsaleh/prefilter_pipeline/SGP}"
+LOG_DIR="$SCRATCH_OUTPUT_ROOT/logs/rank_${CMP_RANKS}"
+
+echo "================================================================================"
+echo "Prefiltered party pipeline"
+echo "================================================================================"
+echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
+echo "SLURM_ARRAY_JOB_ID=${SLURM_ARRAY_JOB_ID:-}"
+echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-}"
+echo "PARTY_LIST=$PARTY_LIST"
+echo "CMP_RANKS=$CMP_RANKS"
+echo "MODEL_PATH=$MODEL_PATH"
+echo "API_BASE_URL=$API_BASE_URL"
+echo "SCRATCH_OUTPUT_ROOT=$SCRATCH_OUTPUT_ROOT"
+echo "LOG_DIR=$LOG_DIR"
+echo "EXTRACT_MAX_NEW_TOKENS=$EXTRACT_MAX_NEW_TOKENS"
+echo "EXTRACT_MAX_CLAIMS=$EXTRACT_MAX_CLAIMS"
+echo "PREFILTER_TOP_K=$PREFILTER_TOP_K"
+echo "ROBERTA_DEVICE=$ROBERTA_DEVICE"
+echo "FORCE_STAGES=$FORCE_STAGES"
+echo "================================================================================"
+
+python -m vllm.entrypoints.openai.api_server \
+  --model "$MODEL_PATH" \
+  --served-model-name "$SERVED_MODEL" \
+  --host 127.0.0.1 \
+  --port "$API_PORT" \
+  > slurm_output/vllm_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}.log 2>&1 &
+
+VLLM_PID=$!
+trap 'kill ${VLLM_PID} 2>/dev/null || true' EXIT
+
+echo "Waiting for vLLM API server..."
+for i in $(seq 1 120); do
+  if curl -fsS "${API_BASE_URL}/models" >/dev/null 2>&1; then
+    echo "vLLM API server is ready"
+    echo "vLLM log: slurm_output/vllm_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}.log"
+    break
+  fi
+  if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
+    echo "vLLM server exited before becoming ready"
+    tail -100 "slurm_output/vllm_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}.log"
+    exit 1
+  fi
+  sleep 5
+done
+
+echo "Starting orchestrate_prefiltered_pipeline.py for party=$PARTY_LIST cmp_rank=$CMP_RANKS"
+python orchestrate_prefiltered_pipeline.py \
+  --model_7b "$MODEL_PATH" \
+  --model_32b /scratch-shared/lsaleh/models/Qwen2.5-32B-Instruct \
+  --backend api \
+  --api_base_url "$API_BASE_URL" \
+  --api_model_name "$SERVED_MODEL" \
+  --api_key "$API_KEY" \
+  --api_temperature 0 \
+  --api_timeout 180 \
+  --min_tokens 100 \
+  --parties "$PARTY_LIST" \
+  --cmp_ranks "$CMP_RANKS" \
+  --extract_dir "$SCRATCH_OUTPUT_ROOT/extracted" \
+  --prefilter_dir "$SCRATCH_OUTPUT_ROOT/prefiltered" \
+  --summary_dir "$SCRATCH_OUTPUT_ROOT/summaries" \
+  --normalize_dir "$SCRATCH_OUTPUT_ROOT/normalized" \
+  --log_dir "$LOG_DIR" \
+  --extract_max_new_tokens "$EXTRACT_MAX_NEW_TOKENS" \
+  --extract_max_claims "$EXTRACT_MAX_CLAIMS" \
+  --prefilter_top_k "$PREFILTER_TOP_K" \
+  --roberta_device "$ROBERTA_DEVICE" \
+  --force_stages "$FORCE_STAGES" \
+  --resume
+
+echo "Finished party=$PARTY_LIST cmp_rank=$CMP_RANKS"
+echo "Outputs:"
+echo "  extracted:  $SCRATCH_OUTPUT_ROOT/extracted"
+echo "  prefilter:  $SCRATCH_OUTPUT_ROOT/prefiltered"
+echo "  summaries:  $SCRATCH_OUTPUT_ROOT/summaries"
+echo "  normalized: $SCRATCH_OUTPUT_ROOT/normalized"

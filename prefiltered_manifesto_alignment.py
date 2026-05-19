@@ -13,8 +13,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PREFILTER_ROOT = Path("/scratch_shared/lsaleh/prefilter_pipeline")
 ALT_PREFILTER_ROOT = Path("/scratch-shared/lsaleh/prefilter_pipeline")
-DEFAULT_MANIFESTO_INDEX = ROOT / "outputs/embeddings/manifesto_sbert_embedding_index.csv"
-DEFAULT_MANIFESTO_EMB = ROOT / "outputs/embeddings/manifesto_sbert_embeddings.npy"
+DEFAULT_MANIFESTO_INDEX = ROOT / "outputs/manifesto/embeddings/manifesto_sbert_embedding_index.csv"
+DEFAULT_MANIFESTO_EMB = ROOT / "outputs/manifesto/embeddings/manifesto_sbert_embeddings.npy"
 ALT_MANIFESTO_INDEX = ROOT / "outputs/manifesto/embeddings/manifesto_sbert_embedding_index.csv"
 ALT_MANIFESTO_EMB = ROOT / "outputs/manifesto/embeddings/manifesto_sbert_embeddings.npy"
 DEFAULT_CMP_MANIFEST = ROOT / "outputs/cmp_manifest.csv"

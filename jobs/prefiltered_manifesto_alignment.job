@@ -1,0 +1,72 @@
+#!/bin/bash
+#SBATCH --partition=rome
+#SBATCH --job-name=pref_manifesto_align
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm_output/prefiltered_manifesto_alignment_%A.out
+
+set -euo pipefail
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+unset PYTHONHOME
+unset PYTHONPATH
+CONDA_BASE=/sw/arch/RHEL9/EB_production/2025/software/Anaconda3/2025.06-1
+ENV_PATH=/scratch-shared/lsaleh/.conda/envs/thesis
+export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
+
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+set +u
+conda activate "$ENV_PATH"
+set -u
+
+cd ~/thesis
+
+PARTIES="${PARTIES:-}"
+PREFILTER_ROOT="${PREFILTER_ROOT:-/scratch_shared/lsaleh/prefilter_pipeline}"
+if [ ! -d "$PREFILTER_ROOT" ] && [ "$PREFILTER_ROOT" = "/scratch_shared/lsaleh/prefilter_pipeline" ] && [ -d "/scratch-shared/lsaleh/prefilter_pipeline" ]; then
+  PREFILTER_ROOT="/scratch-shared/lsaleh/prefilter_pipeline"
+fi
+OUTPUT_DIR="${OUTPUT_DIR:-outputs/analysis/prefiltered_manifesto_alignment}"
+MIN_CLAIMS_PER_DATE="${MIN_CLAIMS_PER_DATE:-5}"
+DOMINANCE_THRESHOLD="${DOMINANCE_THRESHOLD:-0.25}"
+BOOTSTRAP_ITERS="${BOOTSTRAP_ITERS:-1000}"
+MMD_SAMPLE_SIZE="${MMD_SAMPLE_SIZE:-500}"
+ROLLING_WINDOW="${ROLLING_WINDOW:-5}"
+
+echo "================================================================================"
+echo "Prefiltered debate claim vs manifesto alignment analysis"
+echo "================================================================================"
+echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
+echo "PARTIES=${PARTIES:-PVDA}"
+echo "PREFILTER_ROOT=$PREFILTER_ROOT"
+echo "OUTPUT_DIR=$OUTPUT_DIR"
+echo "MIN_CLAIMS_PER_DATE=$MIN_CLAIMS_PER_DATE"
+echo "DOMINANCE_THRESHOLD=$DOMINANCE_THRESHOLD"
+echo "BOOTSTRAP_ITERS=$BOOTSTRAP_ITERS"
+echo "MMD_SAMPLE_SIZE=$MMD_SAMPLE_SIZE"
+echo "ROLLING_WINDOW=$ROLLING_WINDOW"
+echo "================================================================================"
+
+python -m py_compile prefiltered_manifesto_alignment.py
+
+CMD=(
+  python prefiltered_manifesto_alignment.py
+  --prefilter_root "$PREFILTER_ROOT"
+  --cmp_manifest outputs/cmp_manifest.csv
+  --output_dir "$OUTPUT_DIR"
+  --min_claims_per_date "$MIN_CLAIMS_PER_DATE"
+  --dominance_threshold "$DOMINANCE_THRESHOLD"
+  --bootstrap_iters "$BOOTSTRAP_ITERS"
+  --mmd_sample_size "$MMD_SAMPLE_SIZE"
+  --rolling_window "$ROLLING_WINDOW"
+)
+
+if [ -n "$PARTIES" ]; then
+  CMD+=(--parties "$PARTIES")
+fi
+
+"${CMD[@]}"

@@ -23,8 +23,6 @@ set +u
 conda activate "$ENV_PATH"
 set -u
 
-python -m pip install matplotlib
-
 cd ~/thesis
 
 PARTIES="${PARTIES:-}"
@@ -33,6 +31,14 @@ if [ ! -d "$PREFILTER_ROOT" ] && [ "$PREFILTER_ROOT" = "/scratch_shared/lsaleh/p
   PREFILTER_ROOT="/scratch-shared/lsaleh/prefilter_pipeline"
 fi
 OUTPUT_DIR="${OUTPUT_DIR:-outputs/analysis/prefiltered_manifesto_alignment}"
+MANIFESTO_INDEX="${MANIFESTO_INDEX:-outputs/embeddings/manifesto_sbert_embedding_index.csv}"
+MANIFESTO_EMBEDDINGS="${MANIFESTO_EMBEDDINGS:-outputs/embeddings/manifesto_sbert_embeddings.npy}"
+if [ ! -f "$MANIFESTO_INDEX" ] && [ -f "outputs/manifesto/embeddings/manifesto_sbert_embedding_index.csv" ]; then
+  MANIFESTO_INDEX="outputs/manifesto/embeddings/manifesto_sbert_embedding_index.csv"
+fi
+if [ ! -f "$MANIFESTO_EMBEDDINGS" ] && [ -f "outputs/manifesto/embeddings/manifesto_sbert_embeddings.npy" ]; then
+  MANIFESTO_EMBEDDINGS="outputs/manifesto/embeddings/manifesto_sbert_embeddings.npy"
+fi
 MIN_CLAIMS_PER_DATE="${MIN_CLAIMS_PER_DATE:-5}"
 DOMINANCE_THRESHOLD="${DOMINANCE_THRESHOLD:-0.25}"
 BOOTSTRAP_ITERS="${BOOTSTRAP_ITERS:-1000}"
@@ -46,6 +52,8 @@ echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
 echo "PARTIES=${PARTIES:-PVDA}"
 echo "PREFILTER_ROOT=$PREFILTER_ROOT"
 echo "OUTPUT_DIR=$OUTPUT_DIR"
+echo "MANIFESTO_INDEX=$MANIFESTO_INDEX"
+echo "MANIFESTO_EMBEDDINGS=$MANIFESTO_EMBEDDINGS"
 echo "MIN_CLAIMS_PER_DATE=$MIN_CLAIMS_PER_DATE"
 echo "DOMINANCE_THRESHOLD=$DOMINANCE_THRESHOLD"
 echo "BOOTSTRAP_ITERS=$BOOTSTRAP_ITERS"
@@ -58,6 +66,8 @@ python -m py_compile prefiltered_manifesto_alignment.py
 CMD=(
   python prefiltered_manifesto_alignment.py
   --prefilter_root "$PREFILTER_ROOT"
+  --manifesto_index "$MANIFESTO_INDEX"
+  --manifesto_embeddings "$MANIFESTO_EMBEDDINGS"
   --cmp_manifest outputs/cmp_manifest.csv
   --output_dir "$OUTPUT_DIR"
   --min_claims_per_date "$MIN_CLAIMS_PER_DATE"

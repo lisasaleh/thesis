@@ -23,6 +23,8 @@ set +u
 conda activate "$ENV_PATH"
 set -u
 
+python -m pip install matplotlib
+
 cd ~/thesis
 
 PARTIES="${PARTIES:-}"

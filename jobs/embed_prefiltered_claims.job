@@ -1,0 +1,66 @@
+#!/bin/bash
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=embed_prefiltered_claims
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=04:00:00
+#SBATCH --output=slurm_output/embed_prefiltered_claims_%A.out
+
+set -euo pipefail
+
+module purge
+module load 2025
+module load CUDA/12.8.0
+module load Anaconda3/2025.06-1
+
+unset PYTHONHOME
+unset PYTHONPATH
+CONDA_BASE=/sw/arch/RHEL9/EB_production/2025/software/Anaconda3/2025.06-1
+ENV_PATH=/scratch-shared/lsaleh/.conda/envs/thesis
+export CONDA_ENVS_PATH=/scratch-shared/lsaleh/.conda/envs
+export HF_HOME=/scratch-shared/lsaleh/.cache/huggingface
+export TRANSFORMERS_CACHE="$HF_HOME"
+export HF_DATASETS_CACHE="$HF_HOME"
+
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+set +u
+conda activate "$ENV_PATH"
+set -u
+
+export CUDA_HOME="${EBROOTCUDA:-${CUDA_HOME:-/sw/arch/RHEL9/EB_production/2025/software/CUDA/12.8.0}}"
+export CUDA_PATH="$CUDA_HOME"
+export PATH="$CUDA_HOME/bin:$CONDA_PREFIX/bin:$PATH"
+export LD_LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+
+cd ~/thesis
+
+PARTY="${1:-${PARTY:-PVDA}}"
+INPUT_ROOT="${INPUT_ROOT:-/scratch_shared/lsaleh/prefilter_pipeline}"
+if [ ! -d "$INPUT_ROOT" ] && [ "$INPUT_ROOT" = "/scratch_shared/lsaleh/prefilter_pipeline" ] && [ -d "/scratch-shared/lsaleh/prefilter_pipeline" ]; then
+  INPUT_ROOT="/scratch-shared/lsaleh/prefilter_pipeline"
+fi
+OUTPUT_DIR="${OUTPUT_DIR:-${INPUT_ROOT}/${PARTY}/embeddings}"
+BATCH_SIZE="${BATCH_SIZE:-128}"
+MODEL_NAME="${MODEL_NAME:-sentence-transformers/all-MiniLM-L6-v2}"
+
+echo "================================================================================"
+echo "Embedding prefiltered normalized claims"
+echo "================================================================================"
+echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
+echo "PARTY=$PARTY"
+echo "INPUT_ROOT=$INPUT_ROOT"
+echo "OUTPUT_DIR=$OUTPUT_DIR"
+echo "BATCH_SIZE=$BATCH_SIZE"
+echo "MODEL_NAME=$MODEL_NAME"
+echo "================================================================================"
+
+python -m py_compile embed_prefiltered_claims.py
+
+python embed_prefiltered_claims.py "$PARTY" \
+  --input_root "$INPUT_ROOT" \
+  --output_dir "$OUTPUT_DIR" \
+  --debates_csv outputs/debates.csv \
+  --model_name "$MODEL_NAME" \
+  --batch_size "$BATCH_SIZE" \
+  --device auto

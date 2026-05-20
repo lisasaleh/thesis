@@ -19,6 +19,7 @@ DEFAULT_MANIFESTO_EMB = ROOT / "outputs/embeddings/manifesto_sbert_embeddings.np
 ALT_MANIFESTO_INDEX = ROOT / "outputs/manifesto/embeddings/manifesto_sbert_embedding_index.csv"
 ALT_MANIFESTO_EMB = ROOT / "outputs/manifesto/embeddings/manifesto_sbert_embeddings.npy"
 DEFAULT_CMP_MANIFEST = ROOT / "outputs/cmp_manifest.csv"
+DEFAULT_DEBATES_CSV = ROOT / "outputs/debates.csv"
 DEFAULT_OUTPUT_DIR = ROOT / "outputs/analysis/prefiltered_manifesto_alignment"
 
 
@@ -45,6 +46,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CMP_MANIFEST,
         help="Party CMP-rank manifest used when claim indexes only have cmp_rank.",
     )
+    parser.add_argument("--debates_csv", type=Path, default=DEFAULT_DEBATES_CSV)
     parser.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--min_claims_per_date", type=int, default=5)
     parser.add_argument("--dominance_threshold", type=float, default=0.25)
@@ -55,6 +57,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min_claims_for_smoothing", type=int, default=30)
     parser.add_argument("--lowess_frac", type=float, default=0.25)
     parser.add_argument("--n_temporal_bins", type=int, default=20)
+    parser.add_argument("--cabinet_start_date", default="2012-11-05")
+    parser.add_argument("--pre_election_date", default="2016-09-15")
     parser.add_argument("--early_period_quantile", type=float, default=0.33)
     parser.add_argument("--election_period_quantile", type=float, default=0.80)
     parser.add_argument(
@@ -860,13 +864,63 @@ def binned_party_drift(party_df: pd.DataFrame, n_bins: int) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("bin_midpoint")
 
 
+def event_markers_from_debates(debates_csv: Path, output_dir: Path, cabinet_start_date: str, pre_election_date: str) -> pd.DataFrame:
+    labels = [
+        ("cabinet_start", cabinet_start_date),
+        ("six_months_before_election", pre_election_date),
+    ]
+    columns = ["event", "event_date", "date_count", "matched_meeting_date"]
+
+    if not debates_csv.exists():
+        out = pd.DataFrame(columns=columns)
+        out.to_csv(output_dir / "event_date_count_markers.csv", index=False)
+        return out
+
+    debates = pd.read_csv(debates_csv)
+    if "foi_meetingDate" not in debates.columns or "day_count" not in debates.columns:
+        out = pd.DataFrame(columns=columns)
+        out.to_csv(output_dir / "event_date_count_markers.csv", index=False)
+        return out
+
+    dates = debates[["foi_meetingDate", "day_count"]].dropna().copy()
+    dates["foi_meetingDate"] = pd.to_datetime(dates["foi_meetingDate"], errors="coerce")
+    dates["day_count"] = pd.to_numeric(dates["day_count"], errors="coerce")
+    dates = dates.dropna().drop_duplicates("foi_meetingDate").sort_values("foi_meetingDate")
+    dates = dates[dates["day_count"] >= 0].copy()
+
+    rows = []
+    for event, date_text in labels:
+        event_date = pd.to_datetime(date_text)
+        if dates.empty:
+            rows.append({
+                "event": event,
+                "event_date": event_date.date().isoformat(),
+                "date_count": np.nan,
+                "matched_meeting_date": "",
+            })
+            continue
+
+        nearest_idx = (dates["foi_meetingDate"] - event_date).abs().idxmin()
+        nearest = dates.loc[nearest_idx]
+        rows.append({
+            "event": event,
+            "event_date": event_date.date().isoformat(),
+            "date_count": int(nearest["day_count"]),
+            "matched_meeting_date": nearest["foi_meetingDate"].date().isoformat(),
+        })
+
+    out = pd.DataFrame(rows)
+    out.to_csv(output_dir / "event_date_count_markers.csv", index=False)
+    return out
+
+
 def plot_party_cycle_drift(
     party_date: pd.DataFrame,
     output_dir: Path,
     min_claims_for_smoothing: int,
     lowess_frac: float,
     n_temporal_bins: int,
-    election_period_quantile: float,
+    event_markers: pd.DataFrame,
 ) -> None:
     plot_dir = output_dir / "plots" / "manifesto_anchored_drift"
     plot_dir.mkdir(parents=True, exist_ok=True)
@@ -877,36 +931,57 @@ def plot_party_cycle_drift(
         if group.empty:
             continue
 
-        low_claims = group["total_transition_weight"].to_numpy() < min_claims_for_smoothing
-        x = group["date_count"].to_numpy()
-        y = group["weighted_manifesto_anchored_drift"].to_numpy(dtype=float)
-
         binned = binned_party_drift(group, n_temporal_bins)
         if not binned.empty:
             binned["party"] = party
             binned_rows.append(binned)
 
         plt.figure(figsize=(10, 5))
-        election_cut = group["date_count"].quantile(election_period_quantile)
-        plt.axvspan(election_cut, group["date_count"].max(), alpha=0.08, color="gray", label="election-period window")
-        plt.scatter(x[~low_claims], y[~low_claims], s=34, alpha=0.75, label="raw date observations")
-        if low_claims.any():
-            plt.scatter(x[low_claims], y[low_claims], s=40, marker="x", alpha=0.45, label="low-claim observations")
+
+        for _, marker in event_markers.dropna(subset=["date_count"]).iterrows():
+            label = (
+                "cabinet start"
+                if marker["event"] == "cabinet_start"
+                else "six months before election"
+            )
+            plt.axvline(
+                marker["date_count"],
+                color="0.35",
+                linewidth=1.0,
+                alpha=0.45,
+                linestyle="--",
+                label=label,
+            )
 
         if not binned.empty:
             bx = binned["bin_midpoint"].to_numpy()
             by = binned["weighted_manifesto_anchored_drift"].to_numpy(dtype=float)
             bw = binned["total_transition_weight"].to_numpy(dtype=float)
             stable = binned["total_transition_weight"].to_numpy() >= min_claims_for_smoothing
-            plt.scatter(bx, by, s=55, marker="s", alpha=0.8, label="weighted bin means")
+            if np.nanmax(bw) > np.nanmin(bw):
+                sizes = 55 + 130 * (bw - np.nanmin(bw)) / (np.nanmax(bw) - np.nanmin(bw))
+            else:
+                sizes = np.full(len(bw), 80.0)
+            plt.scatter(
+                bx,
+                by,
+                s=sizes,
+                marker="o",
+                alpha=0.82,
+                color="#2f6f9f",
+                edgecolor="white",
+                linewidth=0.8,
+                label="weighted binned means",
+            )
             smooth = weighted_lowess(bx[stable], by[stable], bw[stable], lowess_frac)
             if np.isfinite(smooth).sum() >= 2:
                 order = np.argsort(bx[stable])
                 plt.plot(
                     bx[stable][order],
                     smooth[order],
-                    linewidth=2.2,
-                    label=f"weighted LOWESS on bins (frac={lowess_frac})",
+                    color="#111111",
+                    linewidth=3.0,
+                    label=f"weighted LOWESS trend (frac={lowess_frac})",
                 )
 
         plt.title(f"{party}: manifesto-anchored argument drift over the political cycle")
@@ -1015,6 +1090,12 @@ def main() -> None:
     if aggregate.empty:
         raise ValueError("No party-CMP-date centroids could be scored against same-party manifesto CMP centroids.")
 
+    event_markers = event_markers_from_debates(
+        debates_csv=args.debates_csv,
+        output_dir=args.output_dir,
+        cabinet_start_date=args.cabinet_start_date,
+        pre_election_date=args.pre_election_date,
+    )
     drift = compute_manifesto_anchored_drift(aggregate, date_centroids, args.output_dir)
     party_date = party_date_alignment(drift, args.output_dir)
     party_cycle_drift_summary(drift, aggregate, args.output_dir)
@@ -1026,7 +1107,7 @@ def main() -> None:
         min_claims_for_smoothing=args.min_claims_for_smoothing,
         lowess_frac=args.lowess_frac,
         n_temporal_bins=args.n_temporal_bins,
-        election_period_quantile=args.election_period_quantile,
+        event_markers=event_markers,
     )
 
     print(f"Saved analysis outputs to: {args.output_dir}")

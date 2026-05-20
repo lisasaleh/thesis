@@ -33,6 +33,7 @@ fi
 OUTPUT_DIR="${OUTPUT_DIR:-outputs/analysis/prefiltered_manifesto_alignment}"
 MANIFESTO_INDEX="${MANIFESTO_INDEX:-outputs/embeddings/manifesto_sbert_embedding_index.csv}"
 MANIFESTO_EMBEDDINGS="${MANIFESTO_EMBEDDINGS:-outputs/embeddings/manifesto_sbert_embeddings.npy}"
+DEBATES_CSV="${DEBATES_CSV:-outputs/debates.csv}"
 if [ ! -f "$MANIFESTO_INDEX" ] && [ -f "outputs/manifesto/embeddings/manifesto_sbert_embedding_index.csv" ]; then
   MANIFESTO_INDEX="outputs/manifesto/embeddings/manifesto_sbert_embedding_index.csv"
 fi
@@ -47,6 +48,8 @@ MMD_SAMPLE_SIZE="${MMD_SAMPLE_SIZE:-500}"
 MIN_CLAIMS_FOR_SMOOTHING="${MIN_CLAIMS_FOR_SMOOTHING:-30}"
 LOWESS_FRAC="${LOWESS_FRAC:-0.25}"
 N_TEMPORAL_BINS="${N_TEMPORAL_BINS:-20}"
+CABINET_START_DATE="${CABINET_START_DATE:-2012-11-05}"
+PRE_ELECTION_DATE="${PRE_ELECTION_DATE:-2016-09-15}"
 EARLY_PERIOD_QUANTILE="${EARLY_PERIOD_QUANTILE:-0.33}"
 ELECTION_PERIOD_QUANTILE="${ELECTION_PERIOD_QUANTILE:-0.80}"
 
@@ -59,6 +62,7 @@ echo "PREFILTER_ROOT=$PREFILTER_ROOT"
 echo "OUTPUT_DIR=$OUTPUT_DIR"
 echo "MANIFESTO_INDEX=$MANIFESTO_INDEX"
 echo "MANIFESTO_EMBEDDINGS=$MANIFESTO_EMBEDDINGS"
+echo "DEBATES_CSV=$DEBATES_CSV"
 echo "MIN_CLAIMS_PER_DATE=$MIN_CLAIMS_PER_DATE"
 echo "DOMINANCE_THRESHOLD=$DOMINANCE_THRESHOLD"
 echo "BOOTSTRAP_ITERS=$BOOTSTRAP_ITERS"
@@ -67,6 +71,8 @@ echo "MMD_SAMPLE_SIZE=$MMD_SAMPLE_SIZE"
 echo "MIN_CLAIMS_FOR_SMOOTHING=$MIN_CLAIMS_FOR_SMOOTHING"
 echo "LOWESS_FRAC=$LOWESS_FRAC"
 echo "N_TEMPORAL_BINS=$N_TEMPORAL_BINS"
+echo "CABINET_START_DATE=$CABINET_START_DATE"
+echo "PRE_ELECTION_DATE=$PRE_ELECTION_DATE"
 echo "EARLY_PERIOD_QUANTILE=$EARLY_PERIOD_QUANTILE"
 echo "ELECTION_PERIOD_QUANTILE=$ELECTION_PERIOD_QUANTILE"
 echo "================================================================================"
@@ -86,6 +92,11 @@ if [ ! -f outputs/cmp_manifest.csv ]; then
   exit 1
 fi
 
+if [ ! -f "$DEBATES_CSV" ]; then
+  echo "Missing debates CSV: $DEBATES_CSV"
+  exit 1
+fi
+
 python -m py_compile prefiltered_manifesto_alignment.py
 
 CMD=(
@@ -93,6 +104,7 @@ CMD=(
   --prefilter_root "$PREFILTER_ROOT"
   --manifesto_index "$MANIFESTO_INDEX"
   --manifesto_embeddings "$MANIFESTO_EMBEDDINGS"
+  --debates_csv "$DEBATES_CSV"
   --cmp_manifest outputs/cmp_manifest.csv
   --output_dir "$OUTPUT_DIR"
   --min_claims_per_date "$MIN_CLAIMS_PER_DATE"
@@ -103,6 +115,8 @@ CMD=(
   --min_claims_for_smoothing "$MIN_CLAIMS_FOR_SMOOTHING"
   --lowess_frac "$LOWESS_FRAC"
   --n_temporal_bins "$N_TEMPORAL_BINS"
+  --cabinet_start_date "$CABINET_START_DATE"
+  --pre_election_date "$PRE_ELECTION_DATE"
   --early_period_quantile "$EARLY_PERIOD_QUANTILE"
   --election_period_quantile "$ELECTION_PERIOD_QUANTILE"
 )

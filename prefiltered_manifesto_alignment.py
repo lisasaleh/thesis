@@ -9,6 +9,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+try:
+    import seaborn as sns
+
+    sns.set_theme(
+        style="whitegrid",
+        context="paper",
+        font_scale=1.25,
+    )
+except ModuleNotFoundError:
+    sns = None
+
 
 SCRIPT_PATH = Path(__file__).resolve()
 ROOT = SCRIPT_PATH.parent.parent if SCRIPT_PATH.parent.name == "scripts_analyse" else SCRIPT_PATH.parent
@@ -55,8 +66,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min_bootstrap_claims", type=int, default=10)
     parser.add_argument("--mmd_sample_size", type=int, default=500)
     parser.add_argument("--min_claims_for_smoothing", type=int, default=30)
-    parser.add_argument("--lowess_frac", type=float, default=0.25)
-    parser.add_argument("--n_temporal_bins", type=int, default=20)
+    parser.add_argument("--lowess_frac", type=float, default=0.35)
+    parser.add_argument("--n_temporal_bins", type=int, default=25)
     parser.add_argument("--cabinet_start_date", default="2012-11-05")
     parser.add_argument("--pre_election_date", default="2016-09-15")
     parser.add_argument("--early_period_quantile", type=float, default=0.33)
@@ -588,6 +599,7 @@ def party_date_alignment(drift: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
             "mean_n_claims_current",
             "mean_n_claims_prev",
             "mean_date_gap",
+            "n_transitions",
         ])
         out.to_csv(output_dir / "alignment_by_party_date_count.csv", index=False)
         return out
@@ -604,6 +616,7 @@ def party_date_alignment(drift: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
             "mean_n_claims_current": weighted_average(group["n_claims_current"], weights),
             "mean_n_claims_prev": weighted_average(group["n_claims_prev"], weights),
             "mean_date_gap": weighted_average(group["date_gap"], weights),
+            "n_transitions": int(len(group)),
         })
 
     out = pd.DataFrame(rows).sort_values(["party", "date_count"])
@@ -840,6 +853,7 @@ def binned_party_drift(party_df: pd.DataFrame, n_bins: int) -> pd.DataFrame:
             "total_transition_weight": float(party_df["total_transition_weight"].sum()),
             "mean_n_claims_current": weighted_average(party_df["mean_n_claims_current"], party_df["total_transition_weight"]),
             "mean_n_claims_prev": weighted_average(party_df["mean_n_claims_prev"], party_df["total_transition_weight"]),
+            "n_transitions": int(party_df["n_transitions"].sum()),
         }])
 
     bins = np.linspace(date_min, date_max, n_bins + 1)
@@ -860,6 +874,7 @@ def binned_party_drift(party_df: pd.DataFrame, n_bins: int) -> pd.DataFrame:
             "total_transition_weight": float(weights.sum()),
             "mean_n_claims_current": weighted_average(group["mean_n_claims_current"], weights),
             "mean_n_claims_prev": weighted_average(group["mean_n_claims_prev"], weights),
+            "n_transitions": int(group["n_transitions"].sum()),
         })
     return pd.DataFrame(rows).sort_values("bin_midpoint")
 
@@ -926,6 +941,7 @@ def plot_party_cycle_drift(
     plot_dir.mkdir(parents=True, exist_ok=True)
 
     binned_rows = []
+    binned_by_party = {}
     for party, group in party_date.groupby("party"):
         group = group.sort_values("date_count")
         if group.empty:
@@ -935,34 +951,92 @@ def plot_party_cycle_drift(
         if not binned.empty:
             binned["party"] = party
             binned_rows.append(binned)
+            binned_by_party[party] = binned
 
-        plt.figure(figsize=(10, 5))
+    if binned_rows:
+        all_binned = pd.concat(binned_rows, ignore_index=True)
+        all_binned.to_csv(output_dir / "party_drift_binned_for_plotting.csv", index=False)
+    else:
+        all_binned = pd.DataFrame(columns=[
+            "bin",
+            "bin_midpoint",
+            "weighted_manifesto_anchored_drift",
+            "weighted_local_drift",
+            "total_transition_weight",
+            "mean_n_claims_current",
+            "mean_n_claims_prev",
+            "n_transitions",
+            "party",
+        ])
+        all_binned.to_csv(output_dir / "party_drift_binned_for_plotting.csv", index=False)
 
-        for _, marker in event_markers.dropna(subset=["date_count"]).iterrows():
-            label = (
-                "cabinet start"
-                if marker["event"] == "cabinet_start"
-                else "six months before election"
-            )
-            plt.axvline(
-                marker["date_count"],
-                color="0.35",
-                linewidth=1.0,
-                alpha=0.45,
-                linestyle="--",
-                label=label,
-            )
+    y_values = []
+    for metric in ["weighted_manifesto_anchored_drift", "weighted_local_drift"]:
+        values = all_binned[metric].to_numpy(dtype=float) if metric in all_binned.columns else np.array([])
+        y_values.extend(values[np.isfinite(values)].tolist())
+    y_max = max(y_values) * 1.12 if y_values else 1.0
+    y_max = max(y_max, 0.01)
 
-        if not binned.empty:
+    for party, binned in binned_by_party.items():
+        party_transitions = int(
+            party_date.loc[party_date["party"] == party, "n_transitions"].sum()
+        )
+        party_weight = party_date.loc[party_date["party"] == party, "total_transition_weight"]
+        party_mean = weighted_average(
+            party_date.loc[party_date["party"] == party, "weighted_manifesto_anchored_drift"],
+            party_weight,
+        )
+
+        fig, axes = plt.subplots(
+            2,
+            1,
+            figsize=(10, 8),
+            sharex=True,
+            sharey=True,
+            constrained_layout=True,
+        )
+
+        for ax, metric, title, mean_line in [
+            (
+                axes[0],
+                "weighted_manifesto_anchored_drift",
+                "Manifesto-anchored drift",
+                party_mean,
+            ),
+            (
+                axes[1],
+                "weighted_local_drift",
+                "Local debate-to-debate drift",
+                weighted_average(
+                    party_date.loc[party_date["party"] == party, "weighted_local_drift"],
+                    party_weight,
+                ),
+            ),
+        ]:
+            for _, marker in event_markers.dropna(subset=["date_count"]).iterrows():
+                label = (
+                    "cabinet start"
+                    if marker["event"] == "cabinet_start"
+                    else "six months before election"
+                )
+                ax.axvline(
+                    marker["date_count"],
+                    color="0.65",
+                    linewidth=0.9,
+                    alpha=0.55,
+                    linestyle="--",
+                    label=label,
+                )
+
             bx = binned["bin_midpoint"].to_numpy()
-            by = binned["weighted_manifesto_anchored_drift"].to_numpy(dtype=float)
+            by = binned[metric].to_numpy(dtype=float)
             bw = binned["total_transition_weight"].to_numpy(dtype=float)
             stable = binned["total_transition_weight"].to_numpy() >= min_claims_for_smoothing
             if np.nanmax(bw) > np.nanmin(bw):
-                sizes = 55 + 130 * (bw - np.nanmin(bw)) / (np.nanmax(bw) - np.nanmin(bw))
+                sizes = 45 + 135 * (bw - np.nanmin(bw)) / (np.nanmax(bw) - np.nanmin(bw))
             else:
                 sizes = np.full(len(bw), 80.0)
-            plt.scatter(
+            ax.scatter(
                 bx,
                 by,
                 s=sizes,
@@ -976,7 +1050,7 @@ def plot_party_cycle_drift(
             smooth = weighted_lowess(bx[stable], by[stable], bw[stable], lowess_frac)
             if np.isfinite(smooth).sum() >= 2:
                 order = np.argsort(bx[stable])
-                plt.plot(
+                ax.plot(
                     bx[stable][order],
                     smooth[order],
                     color="#111111",
@@ -984,73 +1058,45 @@ def plot_party_cycle_drift(
                     label=f"weighted LOWESS trend (frac={lowess_frac})",
                 )
 
-        plt.title(f"{party}: manifesto-anchored argument drift over the political cycle")
-        plt.xlabel("date_count")
-        plt.ylabel("weighted manifesto-anchored drift")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(plot_dir / f"{party}_manifesto_anchored_drift.png", dpi=200)
-        plt.close()
+            if np.isfinite(mean_line):
+                ax.axhline(
+                    mean_line,
+                    color="0.35",
+                    linestyle=":",
+                    linewidth=1.2,
+                    alpha=0.75,
+                    label="overall weighted mean",
+                )
 
-    if binned_rows:
-        pd.concat(binned_rows, ignore_index=True).to_csv(output_dir / "party_drift_binned_for_plotting.csv", index=False)
-    else:
-        pd.DataFrame(columns=[
-            "bin",
-            "bin_midpoint",
-            "weighted_manifesto_anchored_drift",
-            "weighted_local_drift",
-            "total_transition_weight",
-            "mean_n_claims_current",
-            "mean_n_claims_prev",
-            "party",
-        ]).to_csv(output_dir / "party_drift_binned_for_plotting.csv", index=False)
+            ax.set_title(title)
+            ax.set_ylabel("weighted drift")
+            ax.set_ylim(0, y_max)
 
-
-def plot_metric_series(aggregate: pd.DataFrame, output_dir: Path, metric: str, ci_cols: tuple[str, str] | None, max_series: int, min_claims_for_smoothing: int) -> None:
-    plot_dir = output_dir / "plots" / metric
-    plot_dir.mkdir(parents=True, exist_ok=True)
-
-    series_sizes = (
-        aggregate.groupby(["party", "cmp_code"])["n_claims"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(max_series)
-    )
-
-    for party, cmp_code in series_sizes.index:
-        group = aggregate[(aggregate["party"] == party) & (aggregate["cmp_code"] == cmp_code)].sort_values("date_count")
-        if len(group) < 2:
-            continue
-
-        x = group["date_count"].to_numpy()
-        y = group[metric].to_numpy(dtype=float)
-        weights = group["n_claims"].to_numpy(dtype=float)
-        low_claims = group["flag_few_claims"].to_numpy(dtype=bool)
-
-        plt.figure(figsize=(10, 5))
-        plt.scatter(x[~low_claims], y[~low_claims], s=34, label="raw points")
-        if low_claims.any():
-            plt.scatter(x[low_claims], y[low_claims], s=42, marker="x", label="low-claim points")
-
-        if ci_cols is not None:
-            low = group[ci_cols[0]].to_numpy(dtype=float)
-            high = group[ci_cols[1]].to_numpy(dtype=float)
-            ci_valid = group["bootstrap_valid"].to_numpy(dtype=bool)
-            if ci_valid.any():
-                plt.fill_between(x[ci_valid], low[ci_valid], high[ci_valid], alpha=0.2, label="95% bootstrap CI")
-
-        smooth = adaptive_weighted_smooth(x, y, weights, min_claims_for_smoothing)
-        if np.isfinite(smooth).sum() >= 2:
-            plt.plot(x, smooth, linewidth=2.0, label=f"adaptive weighted smooth ({min_claims_for_smoothing}+ claims)")
-
-        plt.title(f"{party} CMP {cmp_code}: {metric} over date_count")
-        plt.xlabel("date_count")
-        plt.ylabel(metric)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(plot_dir / f"{party}_cmp_{cmp_code}_{metric}.png", dpi=200)
-        plt.close()
+        axes[1].set_xlabel("date_count")
+        fig.suptitle(
+            (
+                f"{party}: manifesto-anchored argument drift over the political cycle\n"
+                f"Weighted mean drift = {party_mean:.3f} | transitions = {party_transitions}"
+            ),
+            y=1.03,
+        )
+        handles, labels = axes[0].get_legend_handles_labels()
+        unique = dict(zip(labels, handles))
+        fig.legend(
+            unique.values(),
+            unique.keys(),
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.0),
+            ncol=4,
+            frameon=False,
+            fontsize="small",
+        )
+        fig.savefig(
+            plot_dir / f"{party}_manifesto_anchored_drift.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close(fig)
 
 
 def main() -> None:

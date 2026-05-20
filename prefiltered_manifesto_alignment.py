@@ -53,6 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min_bootstrap_claims", type=int, default=10)
     parser.add_argument("--mmd_sample_size", type=int, default=500)
     parser.add_argument("--min_claims_for_smoothing", type=int, default=30)
+    parser.add_argument("--lowess_frac", type=float, default=0.25)
+    parser.add_argument("--n_temporal_bins", type=int, default=20)
     parser.add_argument("--early_period_quantile", type=float, default=0.33)
     parser.add_argument("--election_period_quantile", type=float, default=0.80)
     parser.add_argument(
@@ -507,23 +509,126 @@ def weighted_average(values: pd.Series, weights: pd.Series) -> float:
     return float(np.average(values[valid], weights=weights[valid]))
 
 
-def party_date_alignment(aggregate: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+def weighted_std(values: pd.Series, weights: pd.Series) -> float:
+    valid = values.notna() & weights.notna() & (weights > 0)
+    if not valid.any():
+        return np.nan
+    avg = np.average(values[valid], weights=weights[valid])
+    var = np.average((values[valid] - avg) ** 2, weights=weights[valid])
+    return float(np.sqrt(var))
+
+
+def harmonic_mean(a: float, b: float) -> float:
+    if a <= 0 or b <= 0:
+        return 0.0
+    return float(2 * a * b / (a + b))
+
+
+def compute_manifesto_anchored_drift(
+    aggregate: pd.DataFrame,
+    date_centroids: dict[tuple[str, int, int], np.ndarray],
+    output_dir: Path,
+) -> pd.DataFrame:
     rows = []
-    for (party, date_count), group in aggregate.groupby(["party", "date_count"]):
-        weights = group["n_claims"]
+    for (party, cmp_code), group in aggregate.groupby(["party", "cmp_code"]):
+        group = group.sort_values("date_count")
+        previous_row = None
+        previous_vec = None
+
+        for _, row in group.iterrows():
+            key = (party, int(cmp_code), int(row["date_count"]))
+            vec = date_centroids.get(key)
+            if previous_row is not None and previous_vec is not None and vec is not None:
+                n_prev = int(previous_row["n_claims"])
+                n_current = int(row["n_claims"])
+                transition_weight = harmonic_mean(n_prev, n_current)
+                manifesto_drift = abs(
+                    float(row["centroid_own_manifesto_similarity"])
+                    - float(previous_row["centroid_own_manifesto_similarity"])
+                )
+                local_drift = 1 - float(vec @ previous_vec)
+                rows.append({
+                    "party": party,
+                    "cmp_code": int(cmp_code),
+                    "previous_date_count": int(previous_row["date_count"]),
+                    "date_count": int(row["date_count"]),
+                    "manifesto_anchored_drift": manifesto_drift,
+                    "local_debate_drift": local_drift,
+                    "n_claims_prev": n_prev,
+                    "n_claims_current": n_current,
+                    "transition_weight": transition_weight,
+                })
+
+            previous_row = row
+            previous_vec = vec
+
+    out = pd.DataFrame(rows)
+    out.to_csv(output_dir / "manifesto_anchored_drift.csv", index=False)
+    return out
+
+
+def party_date_alignment(drift: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    rows = []
+    if drift.empty:
+        out = pd.DataFrame(columns=[
+            "party",
+            "date_count",
+            "weighted_manifesto_anchored_drift",
+            "weighted_local_drift",
+            "total_claims",
+            "n_cmp_codes",
+            "total_transition_weight",
+        ])
+        out.to_csv(output_dir / "alignment_by_party_date_count.csv", index=False)
+        return out
+
+    for (party, date_count), group in drift.groupby(["party", "date_count"]):
+        weights = group["transition_weight"]
         rows.append({
             "party": party,
             "date_count": int(date_count),
-            "total_claims": int(weights.sum()),
+            "weighted_manifesto_anchored_drift": weighted_average(group["manifesto_anchored_drift"], weights),
+            "weighted_local_drift": weighted_average(group["local_debate_drift"], weights),
+            "total_claims": int(group["n_claims_current"].sum()),
             "n_cmp_codes": int(group["cmp_code"].nunique()),
-            "weighted_own_manifesto_similarity": weighted_average(group["centroid_own_manifesto_similarity"], weights),
-            "weighted_relative_alignment": weighted_average(group["centroid_relative_alignment"], weights),
-            "weighted_mmd": weighted_average(group["mmd_to_own_manifesto"], weights),
-            "equal_weight_relative_alignment": float(group["centroid_relative_alignment"].mean()),
+            "total_transition_weight": float(weights.sum()),
         })
 
     out = pd.DataFrame(rows).sort_values(["party", "date_count"])
     out.to_csv(output_dir / "alignment_by_party_date_count.csv", index=False)
+    return out
+
+
+def party_cycle_drift_summary(drift: pd.DataFrame, aggregate: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    rows = []
+    if drift.empty:
+        out = pd.DataFrame(columns=[
+            "party",
+            "weighted_mean_manifesto_drift",
+            "weighted_mean_local_drift",
+            "weighted_std_manifesto_drift",
+            "weighted_std_local_drift",
+            "total_transitions",
+            "total_claims",
+        ])
+        out.to_csv(output_dir / "party_cycle_drift_summary.csv", index=False)
+        return out
+
+    total_claims_by_party = aggregate.groupby("party")["n_claims"].sum()
+    for party, group in drift.groupby("party"):
+        weights = group["transition_weight"]
+        rows.append({
+            "party": party,
+            "weighted_mean_manifesto_drift": weighted_average(group["manifesto_anchored_drift"], weights),
+            "weighted_mean_local_drift": weighted_average(group["local_debate_drift"], weights),
+            "weighted_std_manifesto_drift": weighted_std(group["manifesto_anchored_drift"], weights),
+            "weighted_std_local_drift": weighted_std(group["local_debate_drift"], weights),
+            "total_transitions": int(len(group)),
+            "total_claims": int(total_claims_by_party.get(party, 0)),
+        })
+
+    out = pd.DataFrame(rows).sort_values("party")
+    out.to_csv(output_dir / "party_cycle_drift_summary.csv", index=False)
     return out
 
 
@@ -671,6 +776,151 @@ def adaptive_weighted_smooth(x: np.ndarray, y: np.ndarray, weights: np.ndarray, 
     return smooth
 
 
+def weighted_lowess(x: np.ndarray, y: np.ndarray, weights: np.ndarray, frac: float) -> np.ndarray:
+    smooth = np.full(len(y), np.nan)
+    valid = np.isfinite(x) & np.isfinite(y) & np.isfinite(weights) & (weights > 0)
+    if valid.sum() < 3:
+        return smooth
+
+    xv = x[valid]
+    yv = y[valid]
+    wv = weights[valid]
+    valid_positions = np.where(valid)[0]
+    window = max(3, int(np.ceil(frac * len(xv))))
+
+    for target_pos, target_x in zip(valid_positions, xv):
+        order = np.argsort(np.abs(xv - target_x))[:window]
+        xs = xv[order]
+        ys = yv[order]
+        ws = wv[order].copy()
+        max_dist = np.max(np.abs(xs - target_x))
+        if max_dist > 0:
+            ws *= (1 - (np.abs(xs - target_x) / max_dist) ** 3) ** 3
+        if ws.sum() <= 0:
+            continue
+        design = np.column_stack([np.ones(len(xs)), xs - target_x])
+        try:
+            sqrt_w = np.sqrt(ws)
+            beta = np.linalg.lstsq(design * sqrt_w[:, None], ys * sqrt_w, rcond=None)[0]
+            smooth[target_pos] = beta[0]
+        except np.linalg.LinAlgError:
+            smooth[target_pos] = np.average(ys, weights=ws)
+
+    return smooth
+
+
+def binned_party_drift(party_df: pd.DataFrame, n_bins: int) -> pd.DataFrame:
+    if party_df.empty:
+        return pd.DataFrame()
+    date_min = party_df["date_count"].min()
+    date_max = party_df["date_count"].max()
+    if date_min == date_max:
+        return pd.DataFrame([{
+            "bin_midpoint": float(date_min),
+            "weighted_manifesto_anchored_drift": weighted_average(
+                party_df["weighted_manifesto_anchored_drift"],
+                party_df["total_transition_weight"],
+            ),
+            "weighted_local_drift": weighted_average(
+                party_df["weighted_local_drift"],
+                party_df["total_transition_weight"],
+            ),
+            "total_transition_weight": float(party_df["total_transition_weight"].sum()),
+            "total_claims": int(party_df["total_claims"].sum()),
+        }])
+
+    bins = np.linspace(date_min, date_max, n_bins + 1)
+    out = party_df.copy()
+    out["bin"] = pd.cut(out["date_count"], bins=bins, include_lowest=True, labels=False)
+    rows = []
+    for bin_id, group in out.groupby("bin", dropna=True):
+        if group.empty:
+            continue
+        weights = group["total_transition_weight"]
+        left = bins[int(bin_id)]
+        right = bins[int(bin_id) + 1]
+        rows.append({
+            "bin": int(bin_id),
+            "bin_midpoint": float((left + right) / 2),
+            "weighted_manifesto_anchored_drift": weighted_average(group["weighted_manifesto_anchored_drift"], weights),
+            "weighted_local_drift": weighted_average(group["weighted_local_drift"], weights),
+            "total_transition_weight": float(weights.sum()),
+            "total_claims": int(group["total_claims"].sum()),
+        })
+    return pd.DataFrame(rows).sort_values("bin_midpoint")
+
+
+def plot_party_cycle_drift(
+    party_date: pd.DataFrame,
+    output_dir: Path,
+    min_claims_for_smoothing: int,
+    lowess_frac: float,
+    n_temporal_bins: int,
+    election_period_quantile: float,
+) -> None:
+    plot_dir = output_dir / "plots" / "manifesto_anchored_drift"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    binned_rows = []
+    for party, group in party_date.groupby("party"):
+        group = group.sort_values("date_count")
+        if group.empty:
+            continue
+
+        low_claims = group["total_claims"].to_numpy() < min_claims_for_smoothing
+        x = group["date_count"].to_numpy()
+        y = group["weighted_manifesto_anchored_drift"].to_numpy(dtype=float)
+
+        binned = binned_party_drift(group, n_temporal_bins)
+        if not binned.empty:
+            binned["party"] = party
+            binned_rows.append(binned)
+
+        plt.figure(figsize=(10, 5))
+        election_cut = group["date_count"].quantile(election_period_quantile)
+        plt.axvspan(election_cut, group["date_count"].max(), alpha=0.08, color="gray", label="election-period window")
+        plt.scatter(x[~low_claims], y[~low_claims], s=34, alpha=0.75, label="raw date observations")
+        if low_claims.any():
+            plt.scatter(x[low_claims], y[low_claims], s=40, marker="x", alpha=0.45, label="low-claim observations")
+
+        if not binned.empty:
+            bx = binned["bin_midpoint"].to_numpy()
+            by = binned["weighted_manifesto_anchored_drift"].to_numpy(dtype=float)
+            bw = binned["total_transition_weight"].to_numpy(dtype=float)
+            stable = binned["total_claims"].to_numpy() >= min_claims_for_smoothing
+            plt.scatter(bx, by, s=55, marker="s", alpha=0.8, label="weighted bin means")
+            smooth = weighted_lowess(bx[stable], by[stable], bw[stable], lowess_frac)
+            if np.isfinite(smooth).sum() >= 2:
+                order = np.argsort(bx[stable])
+                plt.plot(
+                    bx[stable][order],
+                    smooth[order],
+                    linewidth=2.2,
+                    label=f"weighted LOWESS on bins (frac={lowess_frac})",
+                )
+
+        plt.title(f"{party}: manifesto-anchored argument drift over the political cycle")
+        plt.xlabel("date_count")
+        plt.ylabel("weighted manifesto-anchored drift")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(plot_dir / f"{party}_manifesto_anchored_drift.png", dpi=200)
+        plt.close()
+
+    if binned_rows:
+        pd.concat(binned_rows, ignore_index=True).to_csv(output_dir / "party_drift_binned_for_plotting.csv", index=False)
+    else:
+        pd.DataFrame(columns=[
+            "bin",
+            "bin_midpoint",
+            "weighted_manifesto_anchored_drift",
+            "weighted_local_drift",
+            "total_transition_weight",
+            "total_claims",
+            "party",
+        ]).to_csv(output_dir / "party_drift_binned_for_plotting.csv", index=False)
+
+
 def plot_metric_series(aggregate: pd.DataFrame, output_dir: Path, metric: str, ci_cols: tuple[str, str] | None, max_series: int, min_claims_for_smoothing: int) -> None:
     plot_dir = output_dir / "plots" / metric
     plot_dir.mkdir(parents=True, exist_ok=True)
@@ -754,39 +1004,23 @@ def main() -> None:
     if aggregate.empty:
         raise ValueError("No party-CMP-date centroids could be scored against same-party manifesto CMP centroids.")
 
-    party_date_alignment(aggregate, args.output_dir)
-    period_comparisons(aggregate, args.output_dir, args.early_period_quantile, args.election_period_quantile)
-    debate_to_debate_drift(aggregate, date_centroids, args.output_dir)
+    drift = compute_manifesto_anchored_drift(aggregate, date_centroids, args.output_dir)
+    party_date = party_date_alignment(drift, args.output_dir)
+    party_cycle_drift_summary(drift, aggregate, args.output_dir)
     bootstrap_diagnostics(aggregate, args.output_dir)
-    trend_summary(aggregate, args.output_dir)
 
-    plot_metric_series(
-        aggregate,
-        args.output_dir,
-        "centroid_own_manifesto_similarity",
-        ("own_similarity_ci_low", "own_similarity_ci_high"),
-        args.max_plot_series,
-        args.min_claims_for_smoothing,
-    )
-    plot_metric_series(
-        aggregate,
-        args.output_dir,
-        "centroid_relative_alignment",
-        ("relative_alignment_ci_low", "relative_alignment_ci_high"),
-        args.max_plot_series,
-        args.min_claims_for_smoothing,
-    )
-    plot_metric_series(
-        aggregate,
-        args.output_dir,
-        "mmd_to_own_manifesto",
-        None,
-        args.max_plot_series,
-        args.min_claims_for_smoothing,
+    plot_party_cycle_drift(
+        party_date=party_date,
+        output_dir=args.output_dir,
+        min_claims_for_smoothing=args.min_claims_for_smoothing,
+        lowess_frac=args.lowess_frac,
+        n_temporal_bins=args.n_temporal_bins,
+        election_period_quantile=args.election_period_quantile,
     )
 
     print(f"Saved analysis outputs to: {args.output_dir}")
     print(f"Party-CMP-date rows: {len(aggregate)}")
+    print(f"Manifesto-anchored drift transitions: {len(drift)}")
 
 
 if __name__ == "__main__":

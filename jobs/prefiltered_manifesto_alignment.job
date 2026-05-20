@@ -3,7 +3,7 @@
 #SBATCH --job-name=pref_manifesto_align
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=02:00:00
+#SBATCH --time=00:20:00
 #SBATCH --output=slurm_output/prefiltered_manifesto_alignment_%A.out
 
 set -euo pipefail
@@ -45,6 +45,8 @@ BOOTSTRAP_ITERS="${BOOTSTRAP_ITERS:-1000}"
 MIN_BOOTSTRAP_CLAIMS="${MIN_BOOTSTRAP_CLAIMS:-10}"
 MMD_SAMPLE_SIZE="${MMD_SAMPLE_SIZE:-500}"
 MIN_CLAIMS_FOR_SMOOTHING="${MIN_CLAIMS_FOR_SMOOTHING:-30}"
+LOWESS_FRAC="${LOWESS_FRAC:-0.25}"
+N_TEMPORAL_BINS="${N_TEMPORAL_BINS:-20}"
 EARLY_PERIOD_QUANTILE="${EARLY_PERIOD_QUANTILE:-0.33}"
 ELECTION_PERIOD_QUANTILE="${ELECTION_PERIOD_QUANTILE:-0.80}"
 
@@ -63,6 +65,8 @@ echo "BOOTSTRAP_ITERS=$BOOTSTRAP_ITERS"
 echo "MIN_BOOTSTRAP_CLAIMS=$MIN_BOOTSTRAP_CLAIMS"
 echo "MMD_SAMPLE_SIZE=$MMD_SAMPLE_SIZE"
 echo "MIN_CLAIMS_FOR_SMOOTHING=$MIN_CLAIMS_FOR_SMOOTHING"
+echo "LOWESS_FRAC=$LOWESS_FRAC"
+echo "N_TEMPORAL_BINS=$N_TEMPORAL_BINS"
 echo "EARLY_PERIOD_QUANTILE=$EARLY_PERIOD_QUANTILE"
 echo "ELECTION_PERIOD_QUANTILE=$ELECTION_PERIOD_QUANTILE"
 echo "================================================================================"
@@ -97,6 +101,8 @@ CMD=(
   --min_bootstrap_claims "$MIN_BOOTSTRAP_CLAIMS"
   --mmd_sample_size "$MMD_SAMPLE_SIZE"
   --min_claims_for_smoothing "$MIN_CLAIMS_FOR_SMOOTHING"
+  --lowess_frac "$LOWESS_FRAC"
+  --n_temporal_bins "$N_TEMPORAL_BINS"
   --early_period_quantile "$EARLY_PERIOD_QUANTILE"
   --election_period_quantile "$ELECTION_PERIOD_QUANTILE"
 )

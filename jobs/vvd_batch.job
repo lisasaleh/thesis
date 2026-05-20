@@ -3,7 +3,7 @@
 #SBATCH --gpus=1
 #SBATCH --job-name=vvd_batch_prefiltered
 #SBATCH --ntasks=1
-#SBATCH --array=3-5
+#SBATCH --array=2
 #SBATCH --cpus-per-task=8
 #SBATCH --time=16:00:00
 #SBATCH --output=slurm_output/vvd_batch_prefiltered_%A_%a.out

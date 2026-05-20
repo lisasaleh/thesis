@@ -50,8 +50,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dominance_threshold", type=float, default=0.25)
     parser.add_argument("--bootstrap_iters", type=int, default=1000)
     parser.add_argument("--bootstrap_seed", type=int, default=13)
+    parser.add_argument("--min_bootstrap_claims", type=int, default=10)
     parser.add_argument("--mmd_sample_size", type=int, default=500)
-    parser.add_argument("--rolling_window", type=int, default=5)
+    parser.add_argument("--min_claims_for_smoothing", type=int, default=30)
+    parser.add_argument("--early_period_quantile", type=float, default=0.33)
+    parser.add_argument("--election_period_quantile", type=float, default=0.80)
     parser.add_argument(
         "--max_plot_series",
         type=int,
@@ -243,14 +246,9 @@ def bootstrap_centroid_ci(
     other_centroids: list[np.ndarray],
     rng: np.random.Generator,
     iterations: int,
-) -> tuple[float, float, float, float]:
-    if len(vectors) == 0:
-        return np.nan, np.nan, np.nan, np.nan
-    if len(vectors) == 1 or iterations <= 0:
-        centroid = normalize_vec(vectors.mean(axis=0))
-        own = float(centroid @ own_centroid)
-        rel = own - float(np.mean([centroid @ c for c in other_centroids])) if other_centroids else np.nan
-        return own, own, rel, rel
+) -> tuple[float, float, float, float, bool, bool, bool]:
+    if len(vectors) == 0 or iterations <= 0:
+        return np.nan, np.nan, np.nan, np.nan, False, False, False
 
     own_scores = np.empty(iterations)
     rel_scores = np.empty(iterations)
@@ -263,12 +261,19 @@ def bootstrap_centroid_ci(
         else:
             rel_scores[i] = np.nan
 
+    point_centroid = normalize_vec(vectors.mean(axis=0))
+    point_own = float(point_centroid @ own_centroid)
+    point_rel = point_own - float(np.mean([point_centroid @ c for c in other_centroids])) if other_centroids else np.nan
+
     own_low, own_high = np.quantile(own_scores[np.isfinite(own_scores)], [0.025, 0.975])
     if np.isfinite(rel_scores).any():
         rel_low, rel_high = np.quantile(rel_scores[np.isfinite(rel_scores)], [0.025, 0.975])
     else:
         rel_low, rel_high = np.nan, np.nan
-    return float(own_low), float(own_high), float(rel_low), float(rel_high)
+
+    own_contains = bool(own_low <= point_own <= own_high)
+    rel_contains = bool(np.isfinite(point_rel) and rel_low <= point_rel <= rel_high) if np.isfinite(rel_low) else False
+    return float(own_low), float(own_high), float(rel_low), float(rel_high), True, own_contains, rel_contains
 
 
 def summarize_counts(claims: pd.DataFrame, output_dir: Path, min_claims: int, dominance_threshold: float) -> None:
@@ -309,13 +314,15 @@ def summarize_counts(claims: pd.DataFrame, output_dir: Path, min_claims: int, do
     )
 
 
-def rbf_mmd2(x: np.ndarray, y: np.ndarray, sample_size: int, rng: np.random.Generator) -> float:
-    if len(x) == 0 or len(y) == 0:
-        return np.nan
-    if len(x) > sample_size:
-        x = x[rng.choice(len(x), size=sample_size, replace=False)]
-    if len(y) > sample_size:
-        y = y[rng.choice(len(y), size=sample_size, replace=False)]
+def rbf_mmd2_unbiased(x: np.ndarray, y: np.ndarray, sample_size: int, rng: np.random.Generator) -> tuple[float, int]:
+    if len(x) < 2 or len(y) < 2:
+        return np.nan, min(len(x), len(y))
+
+    sample_size_used = min(sample_size, len(x), len(y))
+    if len(x) > sample_size_used:
+        x = x[rng.choice(len(x), size=sample_size_used, replace=False)]
+    if len(y) > sample_size_used:
+        y = y[rng.choice(len(y), size=sample_size_used, replace=False)]
 
     combined = np.vstack([x, y])
     if len(combined) > 1000:
@@ -326,11 +333,18 @@ def rbf_mmd2(x: np.ndarray, y: np.ndarray, sample_size: int, rng: np.random.Gene
     median_sq = np.median(sq[sq > 0]) if np.any(sq > 0) else 1.0
     gamma = 1.0 / (2.0 * median_sq)
 
-    def kernel_mean(a: np.ndarray, b: np.ndarray) -> float:
+    def kernel_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         dist_sq = np.clip(2 - 2 * (a @ b.T), 0, None)
-        return float(np.exp(-gamma * dist_sq).mean())
+        return np.exp(-gamma * dist_sq)
 
-    return kernel_mean(x, x) + kernel_mean(y, y) - 2 * kernel_mean(x, y)
+    kxx = kernel_matrix(x, x)
+    kyy = kernel_matrix(y, y)
+    kxy = kernel_matrix(x, y)
+    n = len(x)
+    m = len(y)
+    kxx_sum = (kxx.sum() - np.trace(kxx)) / (n * (n - 1))
+    kyy_sum = (kyy.sum() - np.trace(kyy)) / (m * (m - 1))
+    return float(kxx_sum + kyy_sum - 2 * kxy.mean()), sample_size_used
 
 
 def aggregate_centroid_alignment(
@@ -344,7 +358,8 @@ def aggregate_centroid_alignment(
     seed: int,
     mmd_sample_size: int,
     min_claims_per_date: int,
-) -> pd.DataFrame:
+    min_bootstrap_claims: int,
+) -> tuple[pd.DataFrame, dict[tuple[str, int, int], np.ndarray]]:
     rng = np.random.default_rng(seed)
     manifesto_lookup = {
         (party, int(cmp_code)): group["embedding_id"].to_numpy()
@@ -352,6 +367,7 @@ def aggregate_centroid_alignment(
     }
 
     rows = []
+    date_centroids = {}
     for keys, group in claims.groupby(["party_norm", "cmp_code", "date_count"]):
         party, cmp_code, date_count = keys
         own_centroid = manifesto_centroids.get((party, int(cmp_code)))
@@ -361,6 +377,7 @@ def aggregate_centroid_alignment(
         claim_ids = group["embedding_id"].to_numpy(dtype=int)
         claim_vectors = claim_emb[claim_ids]
         debate_centroid = normalize_vec(claim_vectors.mean(axis=0))
+        date_centroids[(party, int(cmp_code), int(date_count))] = debate_centroid
 
         other_centroids = [
             centroid
@@ -376,19 +393,36 @@ def aggregate_centroid_alignment(
             avg_other_similarity = np.nan
             relative_alignment = np.nan
 
-        own_ci_low, own_ci_high, rel_ci_low, rel_ci_high = bootstrap_centroid_ci(
-            vectors=claim_vectors,
-            own_centroid=own_centroid,
-            other_centroids=other_centroids,
-            rng=rng,
-            iterations=bootstrap_iters,
-        )
+        if len(group) >= min_bootstrap_claims:
+            (
+                own_ci_low,
+                own_ci_high,
+                rel_ci_low,
+                rel_ci_high,
+                bootstrap_valid,
+                own_ci_contains_point,
+                relative_ci_contains_point,
+            ) = bootstrap_centroid_ci(
+                vectors=claim_vectors,
+                own_centroid=own_centroid,
+                other_centroids=other_centroids,
+                rng=rng,
+                iterations=bootstrap_iters,
+            )
+        else:
+            own_ci_low = own_ci_high = rel_ci_low = rel_ci_high = np.nan
+            bootstrap_valid = False
+            own_ci_contains_point = False
+            relative_ci_contains_point = False
 
         mani_ids = manifesto_lookup.get((party, int(cmp_code)))
         if mani_ids is None:
             mmd = np.nan
+            mmd_sample_size_used = 0
+            n_manifesto_sentences = 0
         else:
-            mmd = rbf_mmd2(claim_emb[claim_ids], manifesto_emb[mani_ids], mmd_sample_size, rng)
+            n_manifesto_sentences = len(mani_ids)
+            mmd, mmd_sample_size_used = rbf_mmd2_unbiased(claim_emb[claim_ids], manifesto_emb[mani_ids], mmd_sample_size, rng)
 
         rows.append({
             "party": party,
@@ -403,13 +437,18 @@ def aggregate_centroid_alignment(
             "relative_alignment_ci_low": rel_ci_low,
             "relative_alignment_ci_high": rel_ci_high,
             "mmd_to_own_manifesto": mmd,
+            "mmd_sample_size_used": mmd_sample_size_used,
+            "n_manifesto_sentences": n_manifesto_sentences,
             "centroid_avg_other_manifesto_similarity": avg_other_similarity,
             "n_other_manifesto_centroids": len(other_centroids),
+            "bootstrap_valid": bootstrap_valid,
+            "own_ci_contains_point": own_ci_contains_point,
+            "relative_ci_contains_point": relative_ci_contains_point,
         })
 
     out = pd.DataFrame(rows).sort_values(["party", "cmp_code", "date_count"])
     out.to_csv(output_dir / "alignment_by_party_cmp_date_count.csv", index=False)
-    return out
+    return out, date_centroids
 
 
 def trend_summary(aggregate: pd.DataFrame, output_dir: Path, min_dates: int = 3) -> pd.DataFrame:
@@ -442,7 +481,197 @@ def trend_summary(aggregate: pd.DataFrame, output_dir: Path, min_dates: int = 3)
     return out
 
 
-def plot_metric_series(aggregate: pd.DataFrame, output_dir: Path, metric: str, ci_cols: tuple[str, str] | None, max_series: int, rolling_window: int) -> None:
+def bootstrap_diagnostics(aggregate: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    rows = []
+    for metric, flag_col in [
+        ("centroid_own_manifesto_similarity", "own_ci_contains_point"),
+        ("centroid_relative_alignment", "relative_ci_contains_point"),
+    ]:
+        valid = aggregate[aggregate["bootstrap_valid"]].copy()
+        rows.append({
+            "metric": metric,
+            "n_bootstrap_valid_cells": int(len(valid)),
+            "n_point_outside_ci": int((~valid[flag_col]).sum()) if not valid.empty else 0,
+            "share_point_outside_ci": float((~valid[flag_col]).mean()) if not valid.empty else np.nan,
+        })
+
+    out = pd.DataFrame(rows)
+    out.to_csv(output_dir / "bootstrap_ci_diagnostics.csv", index=False)
+    return out
+
+
+def weighted_average(values: pd.Series, weights: pd.Series) -> float:
+    valid = values.notna() & weights.notna() & (weights > 0)
+    if not valid.any():
+        return np.nan
+    return float(np.average(values[valid], weights=weights[valid]))
+
+
+def party_date_alignment(aggregate: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    rows = []
+    for (party, date_count), group in aggregate.groupby(["party", "date_count"]):
+        weights = group["n_claims"]
+        rows.append({
+            "party": party,
+            "date_count": int(date_count),
+            "total_claims": int(weights.sum()),
+            "n_cmp_codes": int(group["cmp_code"].nunique()),
+            "weighted_own_manifesto_similarity": weighted_average(group["centroid_own_manifesto_similarity"], weights),
+            "weighted_relative_alignment": weighted_average(group["centroid_relative_alignment"], weights),
+            "weighted_mmd": weighted_average(group["mmd_to_own_manifesto"], weights),
+            "equal_weight_relative_alignment": float(group["centroid_relative_alignment"].mean()),
+        })
+
+    out = pd.DataFrame(rows).sort_values(["party", "date_count"])
+    out.to_csv(output_dir / "alignment_by_party_date_count.csv", index=False)
+    return out
+
+
+def add_period_labels(aggregate: pd.DataFrame, early_q: float, election_q: float) -> pd.DataFrame:
+    out = aggregate.copy()
+    out["period"] = "mid_term"
+    for party, idx in out.groupby("party").groups.items():
+        party_dates = out.loc[idx, "date_count"]
+        early_cut = party_dates.quantile(early_q)
+        election_cut = party_dates.quantile(election_q)
+        out.loc[party_dates[party_dates <= early_cut].index, "period"] = "early_term"
+        out.loc[party_dates[party_dates >= election_cut].index, "period"] = "election_period"
+    return out
+
+
+def period_comparisons(aggregate: pd.DataFrame, output_dir: Path, early_q: float, election_q: float) -> pd.DataFrame:
+    with_period = add_period_labels(aggregate, early_q, election_q)
+    with_period.to_csv(output_dir / "alignment_by_party_cmp_date_count_with_period.csv", index=False)
+
+    metrics = [
+        "centroid_own_manifesto_similarity",
+        "centroid_relative_alignment",
+        "mmd_to_own_manifesto",
+    ]
+
+    rows_cmp = []
+    for (party, cmp_code, period), group in with_period.groupby(["party", "cmp_code", "period"]):
+        weights = group["n_claims"]
+        row = {
+            "party": party,
+            "cmp_code": int(cmp_code),
+            "period": period,
+            "total_claims": int(weights.sum()),
+            "n_date_counts": int(group["date_count"].nunique()),
+        }
+        for metric in metrics:
+            row[f"weighted_{metric}"] = weighted_average(group[metric], weights)
+            row[f"equal_weight_{metric}"] = float(group[metric].mean())
+        rows_cmp.append(row)
+
+    out_cmp = pd.DataFrame(rows_cmp).sort_values(["party", "cmp_code", "period"])
+    out_cmp.to_csv(output_dir / "period_comparison_by_party_cmp.csv", index=False)
+
+    rows_party = []
+    for (party, period), group in with_period.groupby(["party", "period"]):
+        weights = group["n_claims"]
+        row = {
+            "party": party,
+            "period": period,
+            "total_claims": int(weights.sum()),
+            "n_cmp_codes": int(group["cmp_code"].nunique()),
+            "n_date_counts": int(group["date_count"].nunique()),
+        }
+        for metric in metrics:
+            row[f"weighted_{metric}"] = weighted_average(group[metric], weights)
+            row[f"equal_weight_{metric}"] = float(group[metric].mean())
+        rows_party.append(row)
+
+    out_party = pd.DataFrame(rows_party).sort_values(["party", "period"])
+    out_party.to_csv(output_dir / "period_comparison_by_party.csv", index=False)
+    return with_period
+
+
+def debate_to_debate_drift(aggregate: pd.DataFrame, date_centroids: dict[tuple[str, int, int], np.ndarray], output_dir: Path) -> pd.DataFrame:
+    rows = []
+    for (party, cmp_code), group in aggregate.groupby(["party", "cmp_code"]):
+        group = group.sort_values("date_count")
+        previous_row = None
+        previous_vec = None
+        for _, row in group.iterrows():
+            key = (party, int(cmp_code), int(row["date_count"]))
+            vec = date_centroids.get(key)
+            if previous_row is not None and previous_vec is not None and vec is not None:
+                cosine_similarity = float(vec @ previous_vec)
+                rows.append({
+                    "party": party,
+                    "cmp_code": int(cmp_code),
+                    "date_count": int(row["date_count"]),
+                    "previous_date_count": int(previous_row["date_count"]),
+                    "n_claims": int(row["n_claims"]),
+                    "previous_n_claims": int(previous_row["n_claims"]),
+                    "debate_to_debate_cosine_distance": 1 - cosine_similarity,
+                })
+            previous_row = row
+            previous_vec = vec
+
+    out = pd.DataFrame(rows)
+    out.to_csv(output_dir / "debate_to_debate_drift.csv", index=False)
+
+    party_rows = []
+    if not out.empty:
+        for (party, date_count), group in out.groupby(["party", "date_count"]):
+            weights = group["n_claims"]
+            party_rows.append({
+                "party": party,
+                "date_count": int(date_count),
+                "total_claims": int(weights.sum()),
+                "n_cmp_codes": int(group["cmp_code"].nunique()),
+                "weighted_debate_to_debate_cosine_distance": weighted_average(group["debate_to_debate_cosine_distance"], weights),
+                "equal_weight_debate_to_debate_cosine_distance": float(group["debate_to_debate_cosine_distance"].mean()),
+            })
+
+    party_out = pd.DataFrame(party_rows)
+    party_out.to_csv(output_dir / "debate_to_debate_drift_by_party_date_count.csv", index=False)
+    return out
+
+
+def adaptive_weighted_smooth(x: np.ndarray, y: np.ndarray, weights: np.ndarray, min_claims: int) -> np.ndarray:
+    smooth = np.full(len(y), np.nan)
+    valid = np.isfinite(x) & np.isfinite(y) & np.isfinite(weights) & (weights > 0)
+    if valid.sum() < 3:
+        return smooth
+
+    xv = x[valid]
+    yv = y[valid]
+    wv = weights[valid]
+    valid_positions = np.where(valid)[0]
+
+    for target_pos, target_x in zip(valid_positions, xv):
+        order = np.argsort(np.abs(xv - target_x))
+        cumulative = np.cumsum(wv[order])
+        take_n = int(np.searchsorted(cumulative, min_claims, side="left") + 1)
+        take_n = max(3, min(take_n, len(order)))
+        chosen = order[:take_n]
+        xs = xv[chosen]
+        ys = yv[chosen]
+        ws = wv[chosen]
+
+        max_dist = np.max(np.abs(xs - target_x))
+        if max_dist > 0:
+            local = (1 - (np.abs(xs - target_x) / max_dist) ** 3) ** 3
+            ws = ws * local
+
+        if ws.sum() <= 0:
+            continue
+
+        design = np.column_stack([np.ones(len(xs)), xs - target_x])
+        try:
+            sqrt_w = np.sqrt(ws)
+            beta = np.linalg.lstsq(design * sqrt_w[:, None], ys * sqrt_w, rcond=None)[0]
+            smooth[target_pos] = beta[0]
+        except np.linalg.LinAlgError:
+            smooth[target_pos] = np.average(ys, weights=ws)
+
+    return smooth
+
+
+def plot_metric_series(aggregate: pd.DataFrame, output_dir: Path, metric: str, ci_cols: tuple[str, str] | None, max_series: int, min_claims_for_smoothing: int) -> None:
     plot_dir = output_dir / "plots" / metric
     plot_dir.mkdir(parents=True, exist_ok=True)
 
@@ -460,18 +689,24 @@ def plot_metric_series(aggregate: pd.DataFrame, output_dir: Path, metric: str, c
 
         x = group["date_count"].to_numpy()
         y = group[metric].to_numpy(dtype=float)
+        weights = group["n_claims"].to_numpy(dtype=float)
+        low_claims = group["flag_few_claims"].to_numpy(dtype=bool)
 
         plt.figure(figsize=(10, 5))
-        plt.plot(x, y, marker="o", linewidth=1.5, label=metric)
+        plt.scatter(x[~low_claims], y[~low_claims], s=34, label="raw points")
+        if low_claims.any():
+            plt.scatter(x[low_claims], y[low_claims], s=42, marker="x", label="low-claim points")
 
         if ci_cols is not None:
             low = group[ci_cols[0]].to_numpy(dtype=float)
             high = group[ci_cols[1]].to_numpy(dtype=float)
-            plt.fill_between(x, low, high, alpha=0.2, label="95% bootstrap CI")
+            ci_valid = group["bootstrap_valid"].to_numpy(dtype=bool)
+            if ci_valid.any():
+                plt.fill_between(x[ci_valid], low[ci_valid], high[ci_valid], alpha=0.2, label="95% bootstrap CI")
 
-        if rolling_window > 1 and len(group) >= rolling_window:
-            rolling = group[metric].rolling(rolling_window, min_periods=max(2, rolling_window // 2)).mean()
-            plt.plot(x, rolling, linewidth=2.0, label=f"rolling mean ({rolling_window})")
+        smooth = adaptive_weighted_smooth(x, y, weights, min_claims_for_smoothing)
+        if np.isfinite(smooth).sum() >= 2:
+            plt.plot(x, smooth, linewidth=2.0, label=f"adaptive weighted smooth ({min_claims_for_smoothing}+ claims)")
 
         plt.title(f"{party} CMP {cmp_code}: {metric} over date_count")
         plt.xlabel("date_count")
@@ -503,7 +738,7 @@ def main() -> None:
     if stale_claim_level.exists():
         stale_claim_level.unlink()
 
-    aggregate = aggregate_centroid_alignment(
+    aggregate, date_centroids = aggregate_centroid_alignment(
         claims=claims,
         claim_emb=claim_emb,
         manifesto_df=manifesto_df,
@@ -514,10 +749,15 @@ def main() -> None:
         seed=args.bootstrap_seed,
         mmd_sample_size=args.mmd_sample_size,
         min_claims_per_date=args.min_claims_per_date,
+        min_bootstrap_claims=args.min_bootstrap_claims,
     )
     if aggregate.empty:
         raise ValueError("No party-CMP-date centroids could be scored against same-party manifesto CMP centroids.")
 
+    party_date_alignment(aggregate, args.output_dir)
+    period_comparisons(aggregate, args.output_dir, args.early_period_quantile, args.election_period_quantile)
+    debate_to_debate_drift(aggregate, date_centroids, args.output_dir)
+    bootstrap_diagnostics(aggregate, args.output_dir)
     trend_summary(aggregate, args.output_dir)
 
     plot_metric_series(
@@ -526,7 +766,7 @@ def main() -> None:
         "centroid_own_manifesto_similarity",
         ("own_similarity_ci_low", "own_similarity_ci_high"),
         args.max_plot_series,
-        args.rolling_window,
+        args.min_claims_for_smoothing,
     )
     plot_metric_series(
         aggregate,
@@ -534,7 +774,7 @@ def main() -> None:
         "centroid_relative_alignment",
         ("relative_alignment_ci_low", "relative_alignment_ci_high"),
         args.max_plot_series,
-        args.rolling_window,
+        args.min_claims_for_smoothing,
     )
     plot_metric_series(
         aggregate,
@@ -542,7 +782,7 @@ def main() -> None:
         "mmd_to_own_manifesto",
         None,
         args.max_plot_series,
-        args.rolling_window,
+        args.min_claims_for_smoothing,
     )
 
     print(f"Saved analysis outputs to: {args.output_dir}")

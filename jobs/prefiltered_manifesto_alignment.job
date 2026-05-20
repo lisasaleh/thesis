@@ -25,7 +25,7 @@ set -u
 
 cd ~/thesis
 
-PARTIES="${PARTIES:-}"
+PARTIES="${PARTIES:-PVDA}"
 PREFILTER_ROOT="${PREFILTER_ROOT:-/scratch_shared/lsaleh/prefilter_pipeline}"
 if [ ! -d "$PREFILTER_ROOT" ] && [ "$PREFILTER_ROOT" = "/scratch_shared/lsaleh/prefilter_pipeline" ] && [ -d "/scratch-shared/lsaleh/prefilter_pipeline" ]; then
   PREFILTER_ROOT="/scratch-shared/lsaleh/prefilter_pipeline"
@@ -42,14 +42,17 @@ fi
 MIN_CLAIMS_PER_DATE="${MIN_CLAIMS_PER_DATE:-5}"
 DOMINANCE_THRESHOLD="${DOMINANCE_THRESHOLD:-0.25}"
 BOOTSTRAP_ITERS="${BOOTSTRAP_ITERS:-1000}"
+MIN_BOOTSTRAP_CLAIMS="${MIN_BOOTSTRAP_CLAIMS:-10}"
 MMD_SAMPLE_SIZE="${MMD_SAMPLE_SIZE:-500}"
-ROLLING_WINDOW="${ROLLING_WINDOW:-5}"
+MIN_CLAIMS_FOR_SMOOTHING="${MIN_CLAIMS_FOR_SMOOTHING:-30}"
+EARLY_PERIOD_QUANTILE="${EARLY_PERIOD_QUANTILE:-0.33}"
+ELECTION_PERIOD_QUANTILE="${ELECTION_PERIOD_QUANTILE:-0.80}"
 
 echo "================================================================================"
 echo "Prefiltered debate claim vs manifesto alignment analysis"
 echo "================================================================================"
 echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
-echo "PARTIES=${PARTIES:-PVDA}"
+echo "PARTIES=$PARTIES"
 echo "PREFILTER_ROOT=$PREFILTER_ROOT"
 echo "OUTPUT_DIR=$OUTPUT_DIR"
 echo "MANIFESTO_INDEX=$MANIFESTO_INDEX"
@@ -57,9 +60,27 @@ echo "MANIFESTO_EMBEDDINGS=$MANIFESTO_EMBEDDINGS"
 echo "MIN_CLAIMS_PER_DATE=$MIN_CLAIMS_PER_DATE"
 echo "DOMINANCE_THRESHOLD=$DOMINANCE_THRESHOLD"
 echo "BOOTSTRAP_ITERS=$BOOTSTRAP_ITERS"
+echo "MIN_BOOTSTRAP_CLAIMS=$MIN_BOOTSTRAP_CLAIMS"
 echo "MMD_SAMPLE_SIZE=$MMD_SAMPLE_SIZE"
-echo "ROLLING_WINDOW=$ROLLING_WINDOW"
+echo "MIN_CLAIMS_FOR_SMOOTHING=$MIN_CLAIMS_FOR_SMOOTHING"
+echo "EARLY_PERIOD_QUANTILE=$EARLY_PERIOD_QUANTILE"
+echo "ELECTION_PERIOD_QUANTILE=$ELECTION_PERIOD_QUANTILE"
 echo "================================================================================"
+
+if [ ! -f "$MANIFESTO_INDEX" ]; then
+  echo "Missing manifesto index: $MANIFESTO_INDEX"
+  exit 1
+fi
+
+if [ ! -f "$MANIFESTO_EMBEDDINGS" ]; then
+  echo "Missing manifesto embeddings: $MANIFESTO_EMBEDDINGS"
+  exit 1
+fi
+
+if [ ! -f outputs/cmp_manifest.csv ]; then
+  echo "Missing CMP manifest: outputs/cmp_manifest.csv"
+  exit 1
+fi
 
 python -m py_compile prefiltered_manifesto_alignment.py
 
@@ -73,8 +94,11 @@ CMD=(
   --min_claims_per_date "$MIN_CLAIMS_PER_DATE"
   --dominance_threshold "$DOMINANCE_THRESHOLD"
   --bootstrap_iters "$BOOTSTRAP_ITERS"
+  --min_bootstrap_claims "$MIN_BOOTSTRAP_CLAIMS"
   --mmd_sample_size "$MMD_SAMPLE_SIZE"
-  --rolling_window "$ROLLING_WINDOW"
+  --min_claims_for_smoothing "$MIN_CLAIMS_FOR_SMOOTHING"
+  --early_period_quantile "$EARLY_PERIOD_QUANTILE"
+  --election_period_quantile "$ELECTION_PERIOD_QUANTILE"
 )
 
 if [ -n "$PARTIES" ]; then

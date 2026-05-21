@@ -25,7 +25,7 @@ set -u
 
 cd ~/thesis
 
-PARTIES="${PARTIES:-PVDA}"
+PARTIES="${PARTIES:-50PLUS,CDA,CU,D66,GL,PVDA,PVDD,PVV,SGP,SP,VVD}"
 PREFILTER_ROOT="${PREFILTER_ROOT:-/scratch_shared/lsaleh/prefilter_pipeline}"
 if [ ! -d "$PREFILTER_ROOT" ] && [ "$PREFILTER_ROOT" = "/scratch_shared/lsaleh/prefilter_pipeline" ] && [ -d "/scratch-shared/lsaleh/prefilter_pipeline" ]; then
   PREFILTER_ROOT="/scratch-shared/lsaleh/prefilter_pipeline"

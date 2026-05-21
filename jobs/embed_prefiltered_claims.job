@@ -1,17 +1,15 @@
 #!/bin/bash
-#SBATCH --partition=gpu_a100
-#SBATCH --gpus=1
+#SBATCH --partition=rome
 #SBATCH --job-name=embed_prefiltered_claims
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=06:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=slurm_output/embed_prefiltered_claims_%A.out
 
 set -euo pipefail
 
 module purge
 module load 2025
-module load CUDA/12.8.0
 module load Anaconda3/2025.06-1
 
 unset PYTHONHOME
@@ -28,10 +26,8 @@ set +u
 conda activate "$ENV_PATH"
 set -u
 
-export CUDA_HOME="${EBROOTCUDA:-${CUDA_HOME:-/sw/arch/RHEL9/EB_production/2025/software/CUDA/12.8.0}}"
-export CUDA_PATH="$CUDA_HOME"
-export PATH="$CUDA_HOME/bin:$CONDA_PREFIX/bin:$PATH"
-export LD_LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+export PATH="$CONDA_PREFIX/bin:$PATH"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
 cd ~/thesis
 
@@ -58,7 +54,13 @@ for PARTY in $PARTIES; do
     INPUT_PARTY="SLUS"
   fi
 
+  INPUT_DIR="$INPUT_ROOT/$INPUT_PARTY/normalized"
   OUTPUT_DIR="$INPUT_ROOT/$PARTY/embeddings"
+
+  if [ ! -d "$INPUT_DIR" ]; then
+    echo "Missing normalized input directory for party=$PARTY input_party=$INPUT_PARTY: $INPUT_DIR"
+    exit 1
+  fi
 
   echo ""
   echo "--------------------------------------------------------------------------------"
@@ -72,5 +74,5 @@ for PARTY in $PARTIES; do
     --debates_csv outputs/debates.csv \
     --model_name "$MODEL_NAME" \
     --batch_size "$BATCH_SIZE" \
-    --device auto
+    --device cpu
 done

@@ -33,6 +33,7 @@ test -d "$ENV_PATH/lib/python3.10/encodings" || {
 set +u
 conda activate "$ENV_PATH"
 set -u
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
 cd ~/thesis
 

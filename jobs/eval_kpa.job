@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --partition=gpu_mig
+#SBATCH --gpus=1
+#SBATCH --job-name=eval_kpa
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=9
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm_output/eval_kpa_%A.out
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+source activate thesis
+
+# Key Point Evaluation with Qwen
+# Expected input CSV columns: cluster_id, kp (key point), claim
+# The script will group claims by cluster_id and evaluate each KP against its cluster
+
+srun python eval/eval_kpa.py \
+  outputs/clustered_full_points_20260407_174633.csv \
+  --output-dir outputs/ \
+  --model Qwen/Qwen2.5-7B-Instruct

@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --partition=gpu_mig
+#SBATCH --gpus=1
+#SBATCH --job-name=eval_norm
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=9
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm_output/eval_norm_%A.out
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+source activate thesis
+
+# Normalization Evaluation with Qwen
+# Expected input CSV columns: source_text, normalized_claim
+# Optional: human annotations CSV with evaluation scores for few-shot learning
+
+srun python eval/eval_norm.py \
+  outputs/sample_with_incremental_summary.csv \
+  --output-dir outputs/eval \
+  --model Qwen/Qwen2.5-7B-Instruct

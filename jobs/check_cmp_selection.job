@@ -1,0 +1,20 @@
+#!/bin/bash
+#SBATCH --partition=cpu
+#SBATCH --job-name=check_cmp_selection
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --time=00:10:00
+#SBATCH --output=slurm_output/check_cmp_selection_%A.out
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+source activate thesis
+
+# Adjust party and rank as needed
+srun python tools/check_cmp_selection.py \
+  --party VVD \
+  --rank 1 \
+  --cmp_manifest outputs/cmp_manifest.csv \
+  --debates_csv outputs/debates.csv

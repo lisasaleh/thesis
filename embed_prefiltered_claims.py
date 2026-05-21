@@ -34,7 +34,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input_party",
         default=None,
-        help="Folder and filename party prefix to read. Defaults to party.",
+        help="Input folder name under input_root. Defaults to party.",
+    )
+    parser.add_argument(
+        "--input_prefix",
+        default=None,
+        help="Input filename party prefix. Defaults to party.",
     )
     parser.add_argument(
         "--input_root",
@@ -115,12 +120,21 @@ def first_existing_column(df: pd.DataFrame, candidates: Iterable[str]) -> str | 
     return None
 
 
-def load_party_claims(party: str, input_root: Path, input_party: str | None = None) -> pd.DataFrame:
+def load_party_claims(
+    party: str,
+    input_root: Path,
+    input_party: str | None = None,
+    input_prefix: str | None = None,
+) -> pd.DataFrame:
     input_party = input_party or party
+    input_prefix = input_prefix or party
     normalized_dir = input_root / input_party / "normalized"
-    paths = sorted(normalized_dir.glob(f"{input_party}_cmp_*_prefiltered_normalized.csv"))
+    paths = sorted(normalized_dir.glob(f"{input_prefix}_cmp_*_prefiltered_normalized.csv"))
     if not paths:
-        raise FileNotFoundError(f"No normalized files found in {normalized_dir}")
+        raise FileNotFoundError(
+            f"No normalized files found in {normalized_dir} "
+            f"with prefix {input_prefix!r}"
+        )
 
     frames = []
     for path in paths:
@@ -210,7 +224,7 @@ def main() -> None:
     output_dir = args.output_dir or input_root / args.party / "embeddings"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    df = load_party_claims(args.party, input_root, args.input_party)
+    df = load_party_claims(args.party, input_root, args.input_party, args.input_prefix)
     df = attach_date_metadata(df, args.debates_csv)
     validate_columns(df, args.text_col, args.allow_missing_dates)
 

@@ -3,7 +3,7 @@
 #SBATCH --job-name=embed_prefiltered_claims
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=04:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=slurm_output/embed_prefiltered_claims_%A.out
 
 set -euo pipefail
@@ -50,8 +50,10 @@ python -m py_compile embed_prefiltered_claims.py
 
 for PARTY in $PARTIES; do
   INPUT_PARTY="$PARTY"
+  INPUT_PREFIX="$PARTY"
   if [ "$PARTY" = "50PLUS" ]; then
     INPUT_PARTY="SLUS"
+    INPUT_PREFIX="50PLUS"
   fi
 
   INPUT_DIR="$INPUT_ROOT/$INPUT_PARTY/normalized"
@@ -64,11 +66,12 @@ for PARTY in $PARTIES; do
 
   echo ""
   echo "--------------------------------------------------------------------------------"
-  echo "Embedding party=$PARTY input_party=$INPUT_PARTY output_dir=$OUTPUT_DIR"
+  echo "Embedding party=$PARTY input_party=$INPUT_PARTY input_prefix=$INPUT_PREFIX output_dir=$OUTPUT_DIR"
   echo "--------------------------------------------------------------------------------"
 
   python embed_prefiltered_claims.py "$PARTY" \
     --input_party "$INPUT_PARTY" \
+    --input_prefix "$INPUT_PREFIX" \
     --input_root "$INPUT_ROOT" \
     --output_dir "$OUTPUT_DIR" \
     --debates_csv outputs/debates.csv \

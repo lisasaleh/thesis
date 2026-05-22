@@ -97,6 +97,23 @@ if [ ! -f "$DEBATES_CSV" ]; then
   exit 1
 fi
 
+echo "Checking requested party embedding inputs..."
+IFS=',' read -ra PARTY_ARRAY <<< "$PARTIES"
+for PARTY in "${PARTY_ARRAY[@]}"; do
+  PARTY="$(echo "$PARTY" | xargs)"
+  INDEX_PATH="$PREFILTER_ROOT/$PARTY/embeddings/${PARTY}_prefiltered_claim_sbert_embedding_index.csv"
+  EMB_PATH="$PREFILTER_ROOT/$PARTY/embeddings/${PARTY}_prefiltered_claim_sbert_embeddings.npy"
+  if [ ! -f "$INDEX_PATH" ]; then
+    echo "Missing party embedding index: $INDEX_PATH"
+    exit 1
+  fi
+  if [ ! -f "$EMB_PATH" ]; then
+    echo "Missing party embedding matrix: $EMB_PATH"
+    exit 1
+  fi
+  echo "Found embeddings for $PARTY"
+done
+
 python -m py_compile prefiltered_manifesto_alignment.py
 
 CMD=(

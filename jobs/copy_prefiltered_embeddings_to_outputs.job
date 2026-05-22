@@ -1,0 +1,67 @@
+#!/bin/bash
+#SBATCH --partition=rome
+#SBATCH --job-name=copy_pref_emb
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=00:20:00
+#SBATCH --output=slurm_output/copy_prefiltered_embeddings_to_outputs_%A.out
+
+set -euo pipefail
+
+cd ~/thesis
+
+PARTIES="${PARTIES:-50PLUS CDA CU D66 GL PVDA PVDD PVV SGP SP VVD}"
+SCRATCH_ROOT="${SCRATCH_ROOT:-/scratch-shared/lsaleh/prefilter_pipeline}"
+DEST_ROOT="${DEST_ROOT:-outputs/embeddings/prefiltered_claims}"
+MANIFEST_PATH="$DEST_ROOT/prefiltered_claim_embeddings_manifest.csv"
+
+echo "================================================================================"
+echo "Copy prefiltered claim embeddings from scratch to thesis outputs"
+echo "================================================================================"
+echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
+echo "PARTIES=$PARTIES"
+echo "SCRATCH_ROOT=$SCRATCH_ROOT"
+echo "DEST_ROOT=$DEST_ROOT"
+echo "MANIFEST_PATH=$MANIFEST_PATH"
+echo "================================================================================"
+
+if [ ! -d "$SCRATCH_ROOT" ]; then
+  echo "Scratch root not found: $SCRATCH_ROOT"
+  exit 1
+fi
+
+mkdir -p "$DEST_ROOT"
+printf "party,source_index,source_embeddings,destination_index,destination_embeddings,index_bytes,embedding_bytes\n" > "$MANIFEST_PATH"
+
+for PARTY in $PARTIES; do
+  SRC_DIR="$SCRATCH_ROOT/$PARTY/embeddings"
+  SRC_INDEX="$SRC_DIR/${PARTY}_prefiltered_claim_sbert_embedding_index.csv"
+  SRC_EMB="$SRC_DIR/${PARTY}_prefiltered_claim_sbert_embeddings.npy"
+  DEST_INDEX="$DEST_ROOT/${PARTY}_prefiltered_claim_sbert_embedding_index.csv"
+  DEST_EMB="$DEST_ROOT/${PARTY}_prefiltered_claim_sbert_embeddings.npy"
+
+  echo "Checking $PARTY"
+  if [ ! -f "$SRC_INDEX" ]; then
+    echo "Missing source index for $PARTY: $SRC_INDEX"
+    exit 1
+  fi
+  if [ ! -f "$SRC_EMB" ]; then
+    echo "Missing source embeddings for $PARTY: $SRC_EMB"
+    exit 1
+  fi
+
+  cp -p "$SRC_INDEX" "$DEST_INDEX"
+  cp -p "$SRC_EMB" "$DEST_EMB"
+
+  INDEX_BYTES=$(stat -c%s "$DEST_INDEX")
+  EMB_BYTES=$(stat -c%s "$DEST_EMB")
+  printf "%s,%s,%s,%s,%s,%s,%s\n" \
+    "$PARTY" "$SRC_INDEX" "$SRC_EMB" "$DEST_INDEX" "$DEST_EMB" "$INDEX_BYTES" "$EMB_BYTES" \
+    >> "$MANIFEST_PATH"
+  echo "Copied $PARTY: index=${INDEX_BYTES} bytes, embeddings=${EMB_BYTES} bytes"
+done
+
+echo "================================================================================"
+echo "Done. Copied embeddings to: $DEST_ROOT"
+echo "Manifest: $MANIFEST_PATH"
+echo "================================================================================"

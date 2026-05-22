@@ -1529,6 +1529,7 @@ def main() -> None:
     prefilter_root = resolve_prefilter_root(args.prefilter_root)
     manifesto_index, manifesto_embeddings = resolve_manifesto_paths(args.manifesto_index, args.manifesto_embeddings)
     parties = parse_parties(args.parties)
+    print('NEW FILE')
 
     claims_raw, claim_emb = read_party_embeddings(prefilter_root, parties)
     cmp_rank_map = load_cmp_rank_map(args.cmp_manifest)

@@ -118,6 +118,7 @@ def normalize_vec(vector: np.ndarray) -> np.ndarray:
 
 
 def read_party_embeddings(prefilter_root: Path, parties: list[str] | None) -> tuple[pd.DataFrame, np.ndarray]:
+    requested_parties = parties is not None
     if parties is None:
         index_paths = sorted(prefilter_root.glob("*/embeddings/*_prefiltered_claim_sbert_embedding_index.csv"))
     else:
@@ -130,6 +131,7 @@ def read_party_embeddings(prefilter_root: Path, parties: list[str] | None) -> tu
     vectors = []
     offset = 0
     missing = []
+    loaded_parties = []
 
     for index_path in index_paths:
         if not index_path.exists():
@@ -153,16 +155,23 @@ def read_party_embeddings(prefilter_root: Path, parties: list[str] | None) -> tu
         df["embedding_file"] = str(emb_path)
         frames.append(df)
         vectors.append(emb)
+        loaded_parties.append(party)
         offset += len(df)
 
     if missing:
-        print("[WARN] Missing embedding inputs:")
+        print("[ERROR] Missing embedding inputs:")
         for item in missing:
             print(f"  {item}")
+        if requested_parties:
+            raise FileNotFoundError(
+                "One or more requested party embedding inputs are missing. "
+                "Run jobs/embed_prefiltered_claims.job first or adjust PARTIES/PREFILTER_ROOT."
+            )
 
     if not frames:
         raise FileNotFoundError(f"No party claim embeddings found under {prefilter_root}")
 
+    print(f"Loaded party embeddings: {', '.join(loaded_parties)}")
     return pd.concat(frames, ignore_index=True), normalize_rows(np.vstack(vectors))
 
 
